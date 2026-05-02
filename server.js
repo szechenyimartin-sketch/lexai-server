@@ -8,9 +8,9 @@ app.use(express.json({ limit: '10mb' }));
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-function parseJSON(raw) {
+function parseJSON(raw) 
   if (!raw) return {};
-  let c = raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+  let c = raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim()
   const start = c.indexOf('{');
   if (start < 0) return {};
   c = c.substring(start);
@@ -112,7 +112,7 @@ Válaszolj CSAK JSON-ban:
 }`;
 
       return client.messages.create({
-        model: 'claude-sonnet-4-5',
+        model: 'claude-sonnet-4-5-20251022',
         max_tokens: 4000,
         messages: [{ role: 'user', content: prompt }]
       }).then(r => parseJSON(r.content[0].text)).catch(e => {
@@ -154,7 +154,7 @@ Válaszolj CSAK JSON-ban:
 }`;
 
     const sumResp = await client.messages.create({
-      model: 'claude-sonnet-4-5',
+      model: 'claude-sonnet-4-5-20251022',
       max_tokens: 1000,
       messages: [{ role: 'user', content: sumPrompt }]
     });
