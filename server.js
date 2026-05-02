@@ -33,9 +33,7 @@ function splitIntoChunks(text, maxSize) {
 
 function safeParseJSON(raw) {
   if (!raw) return null;
-  // Remove markdown code blocks
   let c = raw.replace(/```json/gi, '').replace(/```/g, '').trim();
-  // Find first { and last }
   const start = c.indexOf('{');
   const end = c.lastIndexOf('}');
   if (start < 0 || end < 0) return null;
@@ -43,11 +41,8 @@ function safeParseJSON(raw) {
   try {
     return JSON.parse(c);
   } catch(e) {
-    // Try to fix common issues
     try {
-      c = c
-        .replace(/,(\s*[}\]])/g, '$1')  // trailing commas
-        .replace(/([{,]\s*)(\w+)(\s*:)/g, '$1"$2"$3'); // unquoted keys
+      c = c.replace(/,(\s*[}\]])/g, '$1');
       return JSON.parse(c);
     } catch(e2) {
       return null;
@@ -68,7 +63,6 @@ app.post('/api/analyze', async (req, res) => {
     const estPages = Math.max(1, Math.round(text.length / 1800));
     const perspNote = buildPerspective(perspective);
 
-    // Chunk the text
     const CHUNK_SIZE = 14000;
     const chunks = splitIntoChunks(text, CHUNK_SIZE);
     const chunksToAnalyze = chunks.length <= 3
@@ -77,13 +71,20 @@ app.post('/api/analyze', async (req, res) => {
 
     console.log('Elemzés: ' + estPages + ' oldal, ' + chunksToAnalyze.length + ' rész, nézőpont: ' + perspNote);
 
-    // Analyze each chunk - SIMPLE prompt, guaranteed short JSON output
     const sectionPromises = chunksToAnalyze.map((chunk, idx) => {
-      const prompt = 'Te egy magyar ügyvéd vagy. Elemezd ezt a szerződésrészt ' + perspNote + '.\n\n' +
+      const pageFrom = Math.round(idx * (estPages / chunksToAnalyze.length)) + 1;
+      const pageTo = Math.round((idx + 1) * (estPages / chunksToAnalyze.length));
+
+      const prompt = 'Te egy magyar ügyvéd vagy. Elemezd ezt a szerződésrészt ' + perspNote + '.\n' +
+        'Ez a ' + (idx+1) + '. rész, kb. ' + pageFrom + '-' + pageTo + '. oldal.\n\n' +
         'SZÖVEG:\n' + chunk + '\n\n' +
-        'FONTOS: Csak valid JSON-t írj, semmi mást! Pontosan ezt a struktúrát kövesd:\n' +
-        '{"score":NUMBER,"issues":[{"severity":"kritikus","title":"STRING","location":"STRING","description":"STRING","fix_text":"STRING"}],"missing":[{"item":"STRING","importance":"kötelező"}],"positives":["STRING"]}\n\n' +
-        'Max 4 issue, max 4 missing, max 3 positive. Minden string max 100 karakter!';
+        'FONTOS INSTRUKCIÓK:\n' +
+        '1. Minden problémánál add meg PONTOSAN: melyik fejezet, pont, bekezdés és becsült oldal\n' +
+        '2. Az original_text mezőbe írd be az eredeti problémás szövegrészt (max 80 kar)\n' +
+        '3. A fix_text mezőbe írd a konkrét, beilleszthető javított szöveget\n' +
+        '4. Max 4 issue, minden string max 120 karakter\n\n' +
+        'Csak valid JSON-t írj:\n' +
+        '{"score":NUMBER,"issues":[{"severity":"kritikus|figyelmeztetés|info","title":"STRING","location":"pl. 3.2 pont (~' + pageFrom + '. oldal)","original_text":"eredeti szöveg max 80 kar","description":"STRING","fix_text":"konkrét javítási szöveg"}],"missing":[{"item":"STRING","importance":"kötelező|ajánlott","why":"STRING"}],"positives":["STRING"],"structure":{"type":"STRING","parties":["STRING"],"subject":"STRING"}}';
 
       return client.messages.create({
         model: 'claude-sonnet-4-5',
@@ -91,10 +92,10 @@ app.post('/api/analyze', async (req, res) => {
         messages: [{ role: 'user', content: prompt }]
       }).then(r => {
         const raw = r.content[0].text;
-        console.log('Chunk ' + (idx+1) + ' nyers (200 kar):', raw.substring(0, 200));
+        console.log('Chunk ' + (idx+1) + ' nyers:', raw.substring(0, 150));
         const parsed = safeParseJSON(raw);
         if (!parsed) {
-          console.error('Chunk ' + (idx+1) + ' JSON parse SIKERTELEN');
+          console.error('Chunk ' + (idx+1) + ' parse hiba');
           return { score: 50, issues: [], missing: [], positives: [] };
         }
         console.log('Chunk ' + (idx+1) + ' OK: issues=' + (parsed.issues||[]).length);
@@ -107,27 +108,25 @@ app.post('/api/analyze', async (req, res) => {
 
     const sectionResults = await Promise.all(sectionPromises);
 
-    // Merge results
     let allIssues = [], allMissing = [], allPositives = [], scores = [], structure = {};
     for (const r of sectionResults) {
       if (r.score) scores.push(r.score);
       if (r.issues) allIssues = allIssues.concat(r.issues);
       if (r.missing) allMissing = allMissing.concat(r.missing);
       if (r.positives) allPositives = allPositives.concat(r.positives);
-      if (r.structure) structure = r.structure;
+      if (r.structure && r.structure.type) structure = r.structure;
     }
 
     const avgScore = scores.length ? Math.round(scores.reduce((a,b) => a+b, 0) / scores.length) : 50;
     const topIssues = allIssues.slice(0,3).map(i => i.title).join('; ') || 'nincs';
     const kritikusDb = allIssues.filter(i=>i.severity==='kritikus').length;
 
-    // Summary prompt - also short and simple
-    const sumPrompt = 'Magyar jogi szakértő vagy. Adj rövid összefoglalót.\n' +
+    const sumPrompt = 'Magyar jogi szakértő vagy. Rövid összefoglaló.\n' +
       'Szerződés: ' + (type||'általános') + ', ~' + estPages + ' oldal. Nézőpont: ' + perspNote + '.\n' +
-      'Talált problémák: ' + kritikusDb + ' kritikus. Főbb: ' + topIssues + '\n\n' +
-      'Csak ezt a JSON-t írd, semmi mást:\n' +
+      'Kritikus: ' + kritikusDb + ' db. Főbb problémák: ' + topIssues + '\n\n' +
+      'Csak ezt a JSON-t írd:\n' +
       '{"verdict":"STRING","perspective_note":"STRING","risk_level":"magas|közepes|alacsony","summary":"STRING","top_actions":["STRING","STRING","STRING"]}\n' +
-      'Minden string max 150 karakter!';
+      'Max 150 karakter stringenként!';
 
     const sumResp = await client.messages.create({
       model: 'claude-sonnet-4-5',
@@ -136,7 +135,6 @@ app.post('/api/analyze', async (req, res) => {
     });
     const summary = safeParseJSON(sumResp.content[0].text) || {};
 
-    // Dedup issues
     const seen = {};
     const dedupIssues = allIssues.filter(x => {
       const k = x.title||'';
@@ -160,7 +158,7 @@ app.post('/api/analyze', async (req, res) => {
       _sections: chunksToAnalyze.length
     };
 
-    console.log('KÉSZ: score=' + result.score + ', issues=' + result.issues.length + ', missing=' + result.missing.length);
+    console.log('KÉSZ: score=' + result.score + ', issues=' + result.issues.length);
     res.json(result);
 
   } catch(err) {
