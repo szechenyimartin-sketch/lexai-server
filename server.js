@@ -27,7 +27,11 @@ function splitIntoChunks(text, maxSize) {
 
 function safeParseJSON(raw) {
   if (!raw) return null;
-  let c = raw.replace(/```json/gi, '').replace(/```/g, '').trim();
+  let c = raw
+    .replace(/^```json\s*/gim, '')
+    .replace(/^```\s*/gim, '')
+    .replace(/```$/gim, '')
+    .trim();
   const start = c.indexOf('{');
   const end = c.lastIndexOf('}');
   if (start < 0 || end < 0) return null;
@@ -35,7 +39,10 @@ function safeParseJSON(raw) {
   try { return JSON.parse(c); }
   catch(e) {
     try { return JSON.parse(c.replace(/,(\s*[}\]])/g, '$1')); }
-    catch(e2) { return null; }
+    catch(e2) { 
+      console.error('JSON parse hiba:', e2.message, 'raw:', c.substring(0,100));
+      return null; 
+    }
   }
 }
 
