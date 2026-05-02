@@ -27,12 +27,7 @@ function splitIntoChunks(text, maxSize) {
 
 function safeParseJSON(raw) {
   if (!raw) return null;
-  const lines = raw.split('\n');
-  const filtered = lines.filter(function(line) {
-    const t = line.trim();
-    return t !== '```json' && t !== '```';
-  });
-  let c = filtered.join('\n').trim();
+  let c = raw.replace(/```json/g, '').replace(/```/g, '').trim();
   const start = c.indexOf('{');
   const end = c.lastIndexOf('}');
   if (start < 0 || end < 0) return null;
@@ -50,113 +45,102 @@ app.get('/', (req, res) => {
 
 app.post('/api/analyze', async (req, res) => {
   try {
-    const { text, type, perspective } = req.body;
+    const { text, type } = req.body;
     if (!text || text.length < 30) return res.status(400).json({ error: 'Nincs szöveg' });
     if (!process.env.ANTHROPIC_API_KEY) return res.status(500).json({ error: 'API kulcs hiányzik' });
 
     const estPages = Math.max(1, Math.round(text.length / 1800));
-    const CHUNK_SIZE = 14000;
-    const chunks = splitIntoChunks(text, CHUNK_SIZE);
-    const chunksToAnalyze = chunks.length <= 3
-      ? chunks
-      : [chunks[0], chunks[Math.floor(chunks.length / 2)], chunks[chunks.length - 1]];
+    const chunks = splitIntoChunks(text, 12000);
+    const toAnalyze = chunks.length <= 3 ? chunks : [chunks[0], chunks[Math.floor(chunks.length/2)], chunks[chunks.length-1]];
 
-    console.log('Elemzés: ' + estPages + ' oldal, ' + chunksToAnalyze.length + ' rész');
+    console.log('Elemzés: ' + estPages + ' oldal, ' + toAnalyze.length + ' rész');
 
-    const sectionPromises = chunksToAnalyze.map((chunk, idx) => {
-      const pageFrom = Math.round(idx * (estPages / chunksToAnalyze.length)) + 1;
-      const pageTo = Math.round((idx + 1) * (estPages / chunksToAnalyze.length));
+    // SZEKVENCIÁLIS - nem párhuzamos!
+    const results = [];
+    for (let i = 0; i < toAnalyze.length; i++) {
+      const chunk = toAnalyze[i];
+      const pFrom = Math.round(i * estPages / toAnalyze.length) + 1;
+      const pTo = Math.round((i+1) * estPages / toAnalyze.length);
 
-      const prompt = 'Magyar ügyvéd vagy. Elemezd ezt a szerződésrészt mindkét fél szempontjából.\n' +
-        'Rész: ' + (idx+1) + '/' + chunksToAnalyze.length + ' (~' + pageFrom + '-' + pageTo + '. oldal)\n\n' +
-        'SZÖVEG:\n' + chunk + '\n\n' +
-        'Csak nyers JSON, TILOS ```json! Max 3 issue, max 60 kar/string:\n' +
-        '{"issues":[{"severity":"kritikus","title":"rövid cím","location":"3.2 (~' + pageFrom + '.o)","favors":"fel1","description":"rövid ok","fix_text":"javítás"}],"fel1_score":50,"fel2_score":50,"positives":[{"title":"pozitívum","description":"ok"}],"structure":{"type":"típus","fel1":"1. fél","fel2":"2. fél","subject":"tárgy"}}';
-
-      return client.messages.create({
-        model: 'claude-sonnet-4-5',
-        max_tokens: 4000,
-        messages: [{ role: 'user', content: prompt }]
-      }).then(r => {
-        const raw = r.content[0].text;
-        console.log('Chunk ' + (idx+1) + ' raw:', raw.substring(0, 100));
-        const parsed = safeParseJSON(raw);
-        if (!parsed) {
-          console.error('Chunk ' + (idx+1) + ' parse hiba');
-          return { issues: [], fel1_score: 50, fel2_score: 50, positives: [] };
-        }
-        console.log('Chunk ' + (idx+1) + ' OK: issues=' + (parsed.issues||[]).length);
-        return parsed;
-      }).catch(e => {
-        console.error('Chunk ' + (idx+1) + ' hiba:', e.message);
-        return { issues: [], fel1_score: 50, fel2_score: 50, positives: [] };
-      });
-    });
-
-    const sectionResults = await Promise.all(sectionPromises);
-
-    let allIssues = [], allPositives = [], fel1Scores = [], fel2Scores = [], structure = {};
-    for (const r of sectionResults) {
-      if (r.issues) allIssues = allIssues.concat(r.issues);
-      if (r.positives) allPositives = allPositives.concat(r.positives);
-      if (r.fel1_score) fel1Scores.push(r.fel1_score);
-      if (r.fel2_score) fel2Scores.push(r.fel2_score);
-      if (r.structure && r.structure.type) structure = r.structure;
+      try {
+        const r = await client.messages.create({
+          model: 'claude-sonnet-4-5',
+          max_tokens: 1500,
+          messages: [{ role: 'user', content:
+            'Magyar ügyvéd. Elemezd mindkét fél szempontjából. ' +
+            'Rész: ' + (i+1) + '/' + toAnalyze.length + ' (~' + pFrom + '-' + pTo + '. oldal)\n\n' +
+            'SZÖVEG:\n' + chunk + '\n\n' +
+            'JSON (max 3 issue, max 80 kar/string, TILOS ```json):\n' +
+            '{"i":[{"s":"k","t":"cím","l":"hely (~' + pFrom + '.o)","f":"fel1","d":"ok","fix":"javítás"}],"s1":50,"s2":50,"p":[{"t":"pos","d":"ok"}],"st":{"ty":"típus","f1":"fél1","f2":"fél2"}}'
+          }]
+        });
+        const parsed = safeParseJSON(r.content[0].text);
+        console.log('Chunk ' + (i+1) + ': issues=' + (parsed && parsed.i ? parsed.i.length : 0));
+        if (parsed) results.push(parsed);
+      } catch(e) {
+        console.error('Chunk ' + (i+1) + ' hiba:', e.message);
+      }
     }
 
-    const avgFel1 = fel1Scores.length ? Math.round(fel1Scores.reduce((a,b)=>a+b,0)/fel1Scores.length) : 50;
-    const avgFel2 = fel2Scores.length ? Math.round(fel2Scores.reduce((a,b)=>a+b,0)/fel2Scores.length) : 50;
-    const kritikusDb = allIssues.filter(i=>i.severity==='kritikus').length;
-    const topIssues = allIssues.slice(0,3).map(i=>i.title).join('; ') || 'nincs';
+    let allIssues = [], allPos = [], s1 = [], s2 = [], struct = {};
+    for (const r of results) {
+      if (r.i) allIssues = allIssues.concat(r.i.map(function(x) { return {
+        severity: x.s==='k'?'kritikus':x.s==='f'?'figyelmeztetés':'info',
+        title: x.t, location: x.l, favors: x.f,
+        description: x.d, fix_text: x.fix
+      };}));
+      if (r.p) allPos = allPos.concat(r.p.map(function(x){return {title:x.t,description:x.d};}));
+      if (r.s1) s1.push(r.s1);
+      if (r.s2) s2.push(r.s2);
+      if (r.st && r.st.ty) struct = {type:r.st.ty, fel1:r.st.f1, fel2:r.st.f2};
+    }
 
-    const sumPrompt = 'Magyar jogi szakértő. Rövid összefoglaló.\n' +
-      '1. fél: ' + (structure.fel1||'Ügyfél') + ' – ' + avgFel1 + '/100\n' +
-      '2. fél: ' + (structure.fel2||'Szolgáltató') + ' – ' + avgFel2 + '/100\n' +
-      'Kritikus: ' + kritikusDb + '. Főbb: ' + topIssues + '\n\n' +
-      'Válaszolj CSAK nyers JSON-nal (TILOS ```json!), max 150 kar/string:\n' +
-      '{"verdict":"összítélet","per_esely_fel1":NUMBER,"per_esely_fel2":NUMBER,"merleg":"fel1_eros|fel2_eros|kiegyensulyozott","summary":"összefoglaló","fel1_javaslatok":["j1","j2","j3"],"fel2_javaslatok":["j1","j2","j3"],"top_actions":["t1","t2","t3"]}';
+    const avgS1 = s1.length ? Math.round(s1.reduce((a,b)=>a+b,0)/s1.length) : 50;
+    const avgS2 = s2.length ? Math.round(s2.reduce((a,b)=>a+b,0)/s2.length) : 50;
+    const topIssues = allIssues.slice(0,3).map(function(i){return i.title;}).join('; ') || 'nincs';
 
-    const sumResp = await client.messages.create({
+    const sumR = await client.messages.create({
       model: 'claude-sonnet-4-5',
-      max_tokens: 800,
-      messages: [{ role: 'user', content: sumPrompt }]
+      max_tokens: 600,
+      messages: [{ role: 'user', content:
+        'Jogi összefoglaló. 1. fél:' + (struct.fel1||'Ügyfél') + ' ' + avgS1 + '/100. 2. fél:' + (struct.fel2||'Szolgáltató') + ' ' + avgS2 + '/100. Problémák:' + topIssues + '\n' +
+        'JSON (TILOS ```json, max 100 kar/string):\n' +
+        '{"v":"összítélet","p1":NUMBER,"p2":NUMBER,"m":"fel1_eros|fel2_eros|kiegyensulyozott","s":"összefoglaló","j1":["jav1","jav2"],"j2":["jav1","jav2"],"a":["teen1","teen2","teen3"]}'
+      }]
     });
-    const summary = safeParseJSON(sumResp.content[0].text) || {};
+    const sum = safeParseJSON(sumR.content[0].text) || {};
 
     const seen = {};
-    const dedupIssues = allIssues.filter(x => {
-      const k = x.title||'';
-      if(seen[k]) return false;
-      seen[k]=true;
-      return true;
+    const dedup = allIssues.filter(function(x){
+      if(seen[x.title]) return false;
+      seen[x.title]=true; return true;
     });
 
     const result = {
-      fel1_score: avgFel1,
-      fel2_score: avgFel2,
-      fel1_name: structure.fel1 || '1. Fél (Ügyfél)',
-      fel2_name: structure.fel2 || '2. Fél (Szolgáltató)',
-      per_esely_fel1: summary.per_esely_fel1 || Math.round(avgFel1/(avgFel1+avgFel2)*100),
-      per_esely_fel2: summary.per_esely_fel2 || Math.round(avgFel2/(avgFel1+avgFel2)*100),
-      merleg: summary.merleg || 'kiegyensulyozott',
-      score: Math.round((avgFel1+avgFel2)/2),
-      verdict: summary.verdict || 'Az elemzés elkészült.',
-      summary: summary.summary || 'Az elemzés elkészült.',
-      top_actions: summary.top_actions || [],
-      fel1_javaslatok: summary.fel1_javaslatok || [],
-      fel2_javaslatok: summary.fel2_javaslatok || [],
-      issues: dedupIssues.slice(0, 20),
-      positives: allPositives.filter((v,i,a)=>a.findIndex(x=>x.title===v.title)===i).slice(0, 8),
-      structure: structure,
+      fel1_score: avgS1, fel2_score: avgS2,
+      fel1_name: struct.fel1 || '1. Fél (Ügyfél)',
+      fel2_name: struct.fel2 || '2. Fél (Szolgáltató)',
+      per_esely_fel1: sum.p1 || Math.round(avgS1/(avgS1+avgS2)*100),
+      per_esely_fel2: sum.p2 || Math.round(avgS2/(avgS1+avgS2)*100),
+      merleg: sum.m || 'kiegyensulyozott',
+      score: Math.round((avgS1+avgS2)/2),
+      verdict: sum.v || 'Az elemzés elkészült.',
+      summary: sum.s || 'Az elemzés elkészült.',
+      top_actions: sum.a || [],
+      fel1_javaslatok: sum.j1 || [],
+      fel2_javaslatok: sum.j2 || [],
+      issues: dedup.slice(0,15),
+      positives: allPos.filter(function(v,i,a){return a.findIndex(function(x){return x.title===v.title;})=== i;}).slice(0,6),
+      structure: struct,
       _pages: estPages,
-      _sections: chunksToAnalyze.length
+      _sections: toAnalyze.length
     };
 
-    console.log('KÉSZ: fel1=' + result.fel1_score + ', fel2=' + result.fel2_score + ', issues=' + result.issues.length);
+    console.log('KÉSZ: s1=' + result.fel1_score + ' s2=' + result.fel2_score + ' issues=' + result.issues.length);
     res.json(result);
 
   } catch(err) {
-    console.error('Analyze error:', err.message);
+    console.error('Hiba:', err.message);
     res.status(500).json({ error: 'Szerverhiba: ' + err.message });
   }
 });
@@ -167,24 +151,22 @@ app.post('/api/generate', async (req, res) => {
     if (!process.env.ANTHROPIC_API_KEY) return res.status(500).json({ error: 'API kulcs hiányzik' });
 
     if (action === 'hints') {
-      const prompt = 'Magyar ügyvéd. Listázd mit kell egy "' + type + '" szerződésbe "' + favor + '" szerint.\nCsak nyers JSON: {"hints":[{"text":"STRING","importance":"must|rec|opt"}]}\n8-10 elem.';
-      const r = await client.messages.create({ model: 'claude-sonnet-4-5', max_tokens: 4000, messages: [{ role: 'user', content: prompt }] });
+      const r = await client.messages.create({ model: 'claude-sonnet-4-5', max_tokens: 2000, messages: [{ role: 'user', content: 'Magyar ügyvéd. Mit kell egy "' + type + '" szerz.-be "' + favor + '" szerint.\nJSON: {"hints":[{"text":"STRING","importance":"must|rec|opt"}]}' }] });
       return res.json(safeParseJSON(r.content[0].text) || {hints:[]});
     }
 
     if (action === 'generate') {
-      const sys = 'Tapasztalt magyar ügyvéd vagy. Készíts ' + level + ' ' + type + 't PTK alapján. Védd ' + favor + ' érdekeit. Legyen teljes és részletes!';
-      const user = 'Típus: ' + type + '\n1. Fél: ' + (party1||'1. Fél') + '\n2. Fél: ' + (party2||'2. Fél') +
-        '\nÖsszeg: ' + (amount||'megállapodás szerint') + '\nHatáridő: ' + (deadline||'megállapodás szerint') +
-        '\nDátum: ' + (date||new Date().toLocaleDateString('hu-HU')) +
-        '\nRészletesség: ' + level + '\nTárgy: ' + details + '\nKülönleges: ' + (special||'szokásos');
-      const r = await client.messages.create({ model: 'claude-sonnet-4-5', max_tokens: 8000, system: sys, messages: [{ role: 'user', content: user }] });
+      const r = await client.messages.create({
+        model: 'claude-sonnet-4-5', max_tokens: 8000,
+        system: 'Tapasztalt magyar ügyvéd. Készíts ' + level + ' ' + type + 't PTK alapján. Védd ' + favor + ' érdekeit. Legyen teljes!',
+        messages: [{ role: 'user', content: 'Típus:' + type + '\n1. Fél:' + (party1||'1. Fél') + '\n2. Fél:' + (party2||'2. Fél') + '\nÖsszeg:' + (amount||'megállapodás szerint') + '\nHatáridő:' + (deadline||'megállapodás szerint') + '\nDátum:' + (date||new Date().toLocaleDateString('hu-HU')) + '\nRészletesség:' + level + '\nTárgy:' + details + '\nKülönleges:' + (special||'szokásos') }]
+      });
       return res.json({ contract: r.content[0].text });
     }
 
     res.status(400).json({ error: 'Ismeretlen action' });
   } catch(err) {
-    console.error('Generate error:', err.message);
+    console.error('Generate hiba:', err.message);
     res.status(500).json({ error: 'Szerverhiba: ' + err.message });
   }
 });
