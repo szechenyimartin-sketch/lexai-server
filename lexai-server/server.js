@@ -70,8 +70,8 @@ app.post('/api/analyze', async (req, res) => {
       const prompt = 'Magyar ügyvéd vagy. Elemezd ezt a szerződésrészt mindkét fél szempontjából.\n' +
         'Rész: ' + (idx+1) + '/' + chunksToAnalyze.length + ' (~' + pageFrom + '-' + pageTo + '. oldal)\n\n' +
         'SZÖVEG:\n' + chunk + '\n\n' +
-        'Válaszolj CSAK nyers JSON-nal (TILOS ```json használni!), max 4 issue, max 100 kar/string:\n' +
-        '{"issues":[{"severity":"kritikus|figyelmeztetés|info","title":"cím","location":"3.2 pont (~' + pageFrom + '. oldal)","favors":"fel1|fel2|mindketto","description":"magyarázat","fel1_impact":"hatás","fel2_impact":"hatás","fix_text":"javítás"}],"fel1_score":50,"fel2_score":50,"positives":[{"title":"cím","description":"leírás"}],"structure":{"type":"típus","fel1":"1. fél","fel2":"2. fél","subject":"tárgy"}}';
+        'Csak nyers JSON, TILOS ```json! Max 3 issue, max 60 kar/string:\n' +
+        '{"issues":[{"severity":"kritikus","title":"rövid cím","location":"3.2 (~' + pageFrom + '.o)","favors":"fel1","description":"rövid ok","fix_text":"javítás"}],"fel1_score":50,"fel2_score":50,"positives":[{"title":"pozitívum","description":"ok"}],"structure":{"type":"típus","fel1":"1. fél","fel2":"2. fél","subject":"tárgy"}}';
 
       return client.messages.create({
         model: 'claude-sonnet-4-5',
