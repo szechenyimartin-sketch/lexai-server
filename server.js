@@ -82,52 +82,25 @@ app.post('/api/analyze', async (req, res) => {
       const pageFrom = Math.round(idx * (estPages / chunksToAnalyze.length)) + 1;
       const pageTo = Math.round((idx + 1) * (estPages / chunksToAnalyze.length));
 
-      const prompt = `Te egy tapasztalt magyar ügyvéd vagy. Elemezd ezt a szerződésrészt.
-
-NÉZŐPONT: ${perspNote}
-TÍPUS: ${type || 'automatikus'}
-EZ A ${idx+1}/${chunksToAnalyze.length}. RÉSZ (~${pageFrom}-${pageTo}. oldal)
-TELJES DOK: ~${estPages} oldal
-
-SZÖVEG:
-${chunk}
-
-Vizsgáld: felek adatai, tárgy, ellenérték, fizetési feltételek, határidők, késedelmi kamat (PTK 6:155§), kötbér (PTK 6:185§), felmondás (PTK 6:212§), felelősség (PTK 6:152§), szavatosság (PTK 6:159§), titoktartás, GDPR, vitarendezés.
-
-Válaszolj CSAK JSON-ban:
-{
-  "score": 65,
-  "issues": [
-    {
-      "severity": "kritikus|figyelmeztetés|info",
-      "title": "probléma neve",
-      "location": "pl. 3. fejezet 2. pont (~${pageFrom}. oldal)",
-      "original_text": "eredeti problémás szöveg",
-      "description": "részletes magyarázat ${perspNote}",
-      "legal_ref": "PTK §",
-      "fix_text": "KONKRÉT beilleszthető javítási szöveg magyarul",
-      "fix_reason": "miért ez a megoldás"
-    }
-  ],
-  "missing": [
-    {"item": "hiányzó elem", "importance": "kötelező|ajánlott|opcionális", "why": "miért fontos", "suggestion": "javasolt szöveg"}
-  ],
-  "positives": ["pozitívum"],
-  "structure": {"type": "típus", "parties": ["felek"], "subject": "tárgy"}
-}`;
+      const prompt = 'Magyar ügyvéd vagy. Elemezd ezt a szerződésrészt.\n' +
+        'Nézőpont: ' + perspNote + '\n' +
+        'Rész: ' + (idx+1) + '/' + chunksToAnalyze.length + ' (~' + pageFrom + '-' + pageTo + '. oldal)\n\n' +
+        'SZÖVEG:\n' + chunk + '\n\n' +
+        'Válaszolj CSAK valid JSON-ban, tömören, max 5 issue:\n' +
+        '{"score":65,"issues":[{"severity":"kritikus","title":"cím","location":"fejezet","description":"1-2 mondat","legal_ref":"PTK §","fix_text":"javítás"}],"missing":[{"item":"hiányzó","importance":"kötelező","why":"ok"}],"positives":["pozitívum"],"structure":{"type":"típus","parties":["felek"],"subject":"tárgy"}}';
 
       return client.messages.create({
         model: 'claude-sonnet-4-5',
-        max_tokens: 8000,
+        max_tokens: 4000,
         messages: [{ role: 'user', content: prompt }]
       }).then(r => {
         const raw = r.content[0].text;
-        console.log(`Chunk ${idx+1} raw:`, raw.substring(0, 300));
+        console.log('Chunk ' + (idx+1) + ' raw:', raw.substring(0, 200));
         const parsed = parseJSON(raw);
-        console.log(`Chunk ${idx+1} kész: issues=${(parsed.issues||[]).length}`);
+        console.log('Chunk ' + (idx+1) + ' kész: issues=' + (parsed.issues||[]).length);
         return parsed;
       }).catch(e => {
-        console.error(`Chunk ${idx+1} hiba:`, e.message, e.status, e.error);
+        console.error('Chunk ' + (idx+1) + ' hiba:', e.message);
         return { score: 50, issues: [], missing: [], positives: [] };
       });
     });
@@ -146,21 +119,13 @@ Válaszolj CSAK JSON-ban:
     const avgScore = scores.length ? Math.round(scores.reduce((a,b) => a+b, 0) / scores.length) : 50;
     const topIssues = allIssues.slice(0,5).map(i => i.title).join(', ') || 'nincs';
 
-    const sumPrompt = `Magyar jogi szakértő. Összefoglaló az ügyvédnek.
-Szerződés: ${type || structure.type || 'ismeretlen'}, ~${estPages} oldal
-Nézőpont: ${perspNote}
-Kritikus problémák: ${allIssues.filter(i=>i.severity==='kritikus').length} db
-Főbb problémák: ${topIssues}
-
-Válaszolj CSAK JSON-ban:
-{
-  "verdict": "1 mondatos összítélet",
-  "perspective_note": "mit jelent ez konkrétan ${perspNote}",
-  "recommendation": "aláírható-e így / mit kell tenni előtte",
-  "risk_level": "magas|közepes|alacsony",
-  "summary": "4-5 mondatos ügyvédi összefoglaló",
-  "top_actions": ["1. LEGSÜRGŐSEBB: teendő", "2. FONTOS: teendő", "3. AJÁNLOTT: teendő"]
-}`;
+    const sumPrompt = 'Magyar jogi szakértő. Összefoglaló.\n' +
+      'Szerződés: ' + (type || structure.type || 'ismeretlen') + ', ~' + estPages + ' oldal\n' +
+      'Nézőpont: ' + perspNote + '\n' +
+      'Kritikus problémák: ' + allIssues.filter(i=>i.severity==='kritikus').length + ' db\n' +
+      'Főbb problémák: ' + topIssues + '\n\n' +
+      'Válaszolj CSAK JSON-ban:\n' +
+      '{"verdict":"1 mondatos","perspective_note":"mit jelent","recommendation":"aláírható-e","risk_level":"magas|közepes|alacsony","summary":"3-4 mondat","top_actions":["1. teendő","2. teendő","3. teendő"]}';
 
     const sumResp = await client.messages.create({
       model: 'claude-sonnet-4-5',
@@ -190,7 +155,7 @@ Válaszolj CSAK JSON-ban:
       _sections: chunksToAnalyze.length
     };
 
-    console.log(`Kész: score=${result.score}, issues=${result.issues.length}`);
+    console.log('Kész: score=' + result.score + ', issues=' + result.issues.length);
     res.json(result);
 
   } catch(err) {
@@ -205,19 +170,19 @@ app.post('/api/generate', async (req, res) => {
     if (!process.env.ANTHROPIC_API_KEY) return res.status(500).json({ error: 'API kulcs hiányzik' });
 
     if (action === 'hints') {
-      const prompt = `Magyar ügyvéd. Listázd mit kell egy "${type}" szerződésbe belerakni "${favor}" érdekei szerint.
-Válaszolj CSAK JSON-ban: {"hints":[{"text":"kikötés leírása","importance":"must|rec|opt","suggested_text":"javasolt szöveg"}]}
-Legalább 8-10 elem, importance szerint rendezve.`;
+      const prompt = 'Magyar ügyvéd. Listázd mit kell egy "' + type + '" szerződésbe belerakni "' + favor + '" érdekei szerint.\n' +
+        'Válaszolj CSAK JSON-ban: {"hints":[{"text":"kikötés","importance":"must|rec|opt"}]}\n' +
+        'Legalább 8-10 elem.';
       const r = await client.messages.create({ model: 'claude-sonnet-4-5', max_tokens: 2000, messages: [{ role: 'user', content: prompt }] });
       return res.json(parseJSON(r.content[0].text));
     }
 
     if (action === 'generate') {
-      const sys = `Te egy tapasztalt magyar ügyvéd vagy. Készíts ${level} ${type}t PTK alapján. Védd ${favor} érdekeit.
-KÖTELEZŐ: fejléc, preambulum, fogalommeghatározások, tárgy, ellenérték+fizetés, teljesítés+határidők, felek kötelezettségei, szavatosság (PTK 6:159§), felelősség (PTK 6:152§), kötbér (PTK 6:185§), késedelmi kamat (PTK 6:155§), titoktartás+GDPR, felmondás (PTK 6:212§), vis maior, vitarendezés, vegyes rendelkezések, aláírási blokk.
-Legyen TELJES és RÉSZLETES! Csak a szerződés szövegét add vissza!`;
+      const sys = 'Te egy tapasztalt magyar ügyvéd vagy. Készíts ' + level + ' ' + type + 't PTK alapján. Védd ' + favor + ' érdekeit.\n' +
+        'KÖTELEZŐ: fejléc, preambulum, fogalommeghatározások, tárgy, ellenérték+fizetés, teljesítés+határidők, felek kötelezettségei, szavatosság (PTK 6:159§), felelősség (PTK 6:152§), kötbér (PTK 6:185§), késedelmi kamat (PTK 6:155§), titoktartás+GDPR, felmondás (PTK 6:212§), vis maior, vitarendezés, vegyes rendelkezések, aláírási blokk.\n' +
+        'Legyen TELJES és RÉSZLETES! Csak a szerződés szövegét add vissza!';
 
-      const user = `Típus: ${type}\n1. Fél: ${party1||'1. Fél'}\n2. Fél: ${party2||'2. Fél'}\nÖsszeg: ${amount||'megállapodás szerint'}\nHatáridő: ${deadline||'megállapodás szerint'}\nDátum: ${date||new Date().toLocaleDateString('hu-HU')}\nRészletesség: ${level}\nTárgy: ${details}\nKülönleges kikötések: ${special||'szokásos kikötések'}`;
+      const user = 'Típus: ' + type + '\n1. Fél: ' + (party1||'1. Fél') + '\n2. Fél: ' + (party2||'2. Fél') + '\nÖsszeg: ' + (amount||'megállapodás szerint') + '\nHatáridő: ' + (deadline||'megállapodás szerint') + '\nDátum: ' + (date||new Date().toLocaleDateString('hu-HU')) + '\nRészletesség: ' + level + '\nTárgy: ' + details + '\nKülönleges kikötések: ' + (special||'szokásos kikötések');
 
       const r = await client.messages.create({ model: 'claude-sonnet-4-5', max_tokens: 8000, system: sys, messages: [{ role: 'user', content: user }] });
       return res.json({ contract: r.content[0].text });
@@ -231,4 +196,4 @@ Legyen TELJES és RÉSZLETES! Csak a szerződés szövegét add vissza!`;
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`LexAI szerver fut: port ${PORT}`));
+app.listen(PORT, () => console.log('LexAI szerver fut: port ' + PORT));
