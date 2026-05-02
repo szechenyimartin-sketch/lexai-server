@@ -40,7 +40,7 @@ function safeParseJSON(raw) {
 }
 
 app.get('/', (req, res) => {
-  res.json({ status: 'LexAI Backend running', version: '3.0' });
+  res.json({ status: 'LexAI Backend running', version: '4.0' });
 });
 
 app.post('/api/analyze', async (req, res) => {
@@ -55,59 +55,83 @@ app.post('/api/analyze', async (req, res) => {
 
     console.log('Elemzés: ' + estPages + ' oldal, ' + toAnalyze.length + ' rész');
 
-    // SZEKVENCIÁLIS - nem párhuzamos!
-    const results = [];
+    const allIssues = [];
+    const allPos = [];
+    const s1arr = [], s2arr = [];
+    let struct = {};
+
     for (let i = 0; i < toAnalyze.length; i++) {
       const chunk = toAnalyze[i];
       const pFrom = Math.round(i * estPages / toAnalyze.length) + 1;
       const pTo = Math.round((i+1) * estPages / toAnalyze.length);
 
+      // Egyetlen kis JSON objektum per hívás - soha nem csonkul
       try {
         const r = await client.messages.create({
           model: 'claude-sonnet-4-5',
-          max_tokens: 1500,
+          max_tokens: 1000,
           messages: [{ role: 'user', content:
-            'Magyar ügyvéd. Elemezd mindkét fél szempontjából. ' +
-            'Rész: ' + (i+1) + '/' + toAnalyze.length + ' (~' + pFrom + '-' + pTo + '. oldal)\n\n' +
-            'SZÖVEG:\n' + chunk + '\n\n' +
-            'JSON (max 3 issue, max 80 kar/string, TILOS ```json):\n' +
-            '{"i":[{"s":"k","t":"cím","l":"hely (~' + pFrom + '.o)","f":"fel1","d":"ok","fix":"javítás"}],"s1":50,"s2":50,"p":[{"t":"pos","d":"ok"}],"st":{"ty":"típus","f1":"fél1","f2":"fél2"}}'
+            'Magyar ügyvéd. Elemezd ezt a szerződésrészt (~' + pFrom + '-' + pTo + '. oldal).\n\n' +
+            chunk + '\n\n' +
+            'Válaszolj egyetlen kis JSON objektummal (TILOS ```json, max 80 kar/érték):\n' +
+            '{"fel1_score":NUMBER,"fel2_score":NUMBER,"fel1":"1.fél neve","fel2":"2.fél neve","type":"szerz.típus","subject":"tárgy",' +
+            '"issue1_sev":"kritikus|figyelmeztetés|info","issue1_title":"cím","issue1_loc":"hely","issue1_favors":"fel1|fel2","issue1_desc":"leírás","issue1_fix":"javítás",' +
+            '"issue2_sev":"","issue2_title":"","issue2_loc":"","issue2_favors":"","issue2_desc":"","issue2_fix":"",' +
+            '"issue3_sev":"","issue3_title":"","issue3_loc":"","issue3_favors":"","issue3_desc":"","issue3_fix":"",' +
+            '"pos1":"pozitívum 1","pos2":"pozitívum 2"}'
           }]
         });
+
         const parsed = safeParseJSON(r.content[0].text);
-        console.log('Chunk ' + (i+1) + ': issues=' + (parsed && parsed.i ? parsed.i.length : 0));
-        if (parsed) results.push(parsed);
+        if (!parsed) {
+          console.error('Chunk ' + (i+1) + ' parse hiba');
+          continue;
+        }
+
+        if (parsed.fel1_score) s1arr.push(parsed.fel1_score);
+        if (parsed.fel2_score) s2arr.push(parsed.fel2_score);
+        if (parsed.fel1 && !struct.fel1) struct = {type: parsed.type, fel1: parsed.fel1, fel2: parsed.fel2, subject: parsed.subject};
+
+        // Issues kinyerése
+        for (let n = 1; n <= 3; n++) {
+          const sev = parsed['issue'+n+'_sev'];
+          const title = parsed['issue'+n+'_title'];
+          if (sev && title && title.length > 2) {
+            allIssues.push({
+              severity: sev,
+              title: title,
+              location: parsed['issue'+n+'_loc'] || '',
+              favors: parsed['issue'+n+'_favors'] || 'mindketto',
+              description: parsed['issue'+n+'_desc'] || '',
+              fix_text: parsed['issue'+n+'_fix'] || ''
+            });
+          }
+        }
+
+        if (parsed.pos1) allPos.push({title: parsed.pos1, description: ''});
+        if (parsed.pos2) allPos.push({title: parsed.pos2, description: ''});
+
+        console.log('Chunk ' + (i+1) + ' OK: ' + allIssues.length + ' issue eddig');
+
       } catch(e) {
         console.error('Chunk ' + (i+1) + ' hiba:', e.message);
       }
     }
 
-    let allIssues = [], allPos = [], s1 = [], s2 = [], struct = {};
-    for (const r of results) {
-      if (r.i) allIssues = allIssues.concat(r.i.map(function(x) { return {
-        severity: x.s==='k'?'kritikus':x.s==='f'?'figyelmeztetés':'info',
-        title: x.t, location: x.l, favors: x.f,
-        description: x.d, fix_text: x.fix
-      };}));
-      if (r.p) allPos = allPos.concat(r.p.map(function(x){return {title:x.t,description:x.d};}));
-      if (r.s1) s1.push(r.s1);
-      if (r.s2) s2.push(r.s2);
-      if (r.st && r.st.ty) struct = {type:r.st.ty, fel1:r.st.f1, fel2:r.st.f2};
-    }
-
-    const avgS1 = s1.length ? Math.round(s1.reduce((a,b)=>a+b,0)/s1.length) : 50;
-    const avgS2 = s2.length ? Math.round(s2.reduce((a,b)=>a+b,0)/s2.length) : 50;
+    const avgS1 = s1arr.length ? Math.round(s1arr.reduce((a,b)=>a+b,0)/s1arr.length) : 50;
+    const avgS2 = s2arr.length ? Math.round(s2arr.reduce((a,b)=>a+b,0)/s2arr.length) : 50;
     const topIssues = allIssues.slice(0,3).map(function(i){return i.title;}).join('; ') || 'nincs';
 
     const sumR = await client.messages.create({
       model: 'claude-sonnet-4-5',
       max_tokens: 600,
       messages: [{ role: 'user', content:
-        'Jogi összefoglaló. 1. fél:' + (struct.fel1||'Ügyfél') + ' ' + avgS1 + '/100. 2. fél:' + (struct.fel2||'Szolgáltató') + ' ' + avgS2 + '/100. Problémák:' + topIssues + '\n' +
-        'JSON (TILOS ```json, max 100 kar/string):\n' +
-        '{"v":"összítélet","p1":NUMBER,"p2":NUMBER,"m":"fel1_eros|fel2_eros|kiegyensulyozott","s":"összefoglaló","j1":["jav1","jav2"],"j2":["jav1","jav2"],"a":["teen1","teen2","teen3"]}'
+        'Jogi összefoglaló. 1.fél:' + (struct.fel1||'Ügyfél') + ' ' + avgS1 + '/100. 2.fél:' + (struct.fel2||'Szolgáltató') + ' ' + avgS2 + '/100. Főbb problémák:' + topIssues + '\n' +
+        'JSON (TILOS ```json, max 120 kar/érték):\n' +
+        '{"verdict":"összítélet","p1":NUMBER,"p2":NUMBER,"merleg":"fel1_eros|fel2_eros|kiegyensulyozott","summary":"összefoglaló","j1a":"javaslat 1 fél 1","j1b":"javaslat 2 fél 1","j1c":"javaslat 3 fél 1","j2a":"javaslat 1 fél 2","j2b":"javaslat 2 fél 2","j2c":"javaslat 3 fél 2","a1":"teendő 1","a2":"teendő 2","a3":"teendő 3"}'
       }]
     });
+
     const sum = safeParseJSON(sumR.content[0].text) || {};
 
     const seen = {};
@@ -117,20 +141,21 @@ app.post('/api/analyze', async (req, res) => {
     });
 
     const result = {
-      fel1_score: avgS1, fel2_score: avgS2,
+      fel1_score: avgS1,
+      fel2_score: avgS2,
       fel1_name: struct.fel1 || '1. Fél (Ügyfél)',
       fel2_name: struct.fel2 || '2. Fél (Szolgáltató)',
       per_esely_fel1: sum.p1 || Math.round(avgS1/(avgS1+avgS2)*100),
       per_esely_fel2: sum.p2 || Math.round(avgS2/(avgS1+avgS2)*100),
-      merleg: sum.m || 'kiegyensulyozott',
+      merleg: sum.merleg || 'kiegyensulyozott',
       score: Math.round((avgS1+avgS2)/2),
-      verdict: sum.v || 'Az elemzés elkészült.',
-      summary: sum.s || 'Az elemzés elkészült.',
-      top_actions: sum.a || [],
-      fel1_javaslatok: sum.j1 || [],
-      fel2_javaslatok: sum.j2 || [],
-      issues: dedup.slice(0,15),
-      positives: allPos.filter(function(v,i,a){return a.findIndex(function(x){return x.title===v.title;})=== i;}).slice(0,6),
+      verdict: sum.verdict || 'Az elemzés elkészült.',
+      summary: sum.summary || 'Az elemzés elkészült.',
+      top_actions: [sum.a1, sum.a2, sum.a3].filter(Boolean),
+      fel1_javaslatok: [sum.j1a, sum.j1b, sum.j1c].filter(Boolean),
+      fel2_javaslatok: [sum.j2a, sum.j2b, sum.j2c].filter(Boolean),
+      issues: dedup.slice(0, 15),
+      positives: allPos.filter(function(v,i,a){return a.findIndex(function(x){return x.title===v.title;})===i;}).slice(0,6),
       structure: struct,
       _pages: estPages,
       _sections: toAnalyze.length
