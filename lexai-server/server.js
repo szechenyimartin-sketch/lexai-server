@@ -10,10 +10,16 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 function parseJSON(raw) {
   if (!raw) return {};
-  let c = raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+  let c = raw
+    .replace(/^```json\s*/gim, '')
+    .replace(/^```\s*/gim, '')
+    .replace(/```$/gim, '')
+    .trim();
   const start = c.indexOf('{');
   if (start < 0) return {};
   c = c.substring(start);
+  const end = c.lastIndexOf('}');
+  if (end >= 0) c = c.substring(0, end + 1);
   try { return JSON.parse(c); } catch(e) {
     try {
       c = c.replace(/,\s*}/g, '}').replace(/,\s*]/g, ']');
@@ -21,7 +27,10 @@ function parseJSON(raw) {
       for(const ch of c){ if(ch==='{')op++; if(ch==='}')cl++; }
       for(let i=0;i<op-cl;i++) c+='}';
       return JSON.parse(c);
-    } catch(e2) { return {}; }
+    } catch(e2) {
+      console.error('parseJSON hiba:', e2.message);
+      return {};
+    }
   }
 }
 
@@ -48,12 +57,10 @@ function splitIntoChunks(text, maxSize) {
   return chunks.length ? chunks : [text];
 }
 
-// Health check
 app.get('/', (req, res) => {
   res.json({ status: 'LexAI Backend running', version: '2.0' });
 });
 
-// ANALYZE endpoint - teljes dokumentum elemzés, nincs timeout korlát
 app.post('/api/analyze', async (req, res) => {
   try {
     const { text, type, perspective } = req.body;
@@ -63,8 +70,7 @@ app.post('/api/analyze', async (req, res) => {
     const estPages = Math.max(1, Math.round(text.length / 1800));
     const perspNote = buildPerspective(perspective);
 
-    // Nagy dokumentumnál max 3 részre osztjuk és párhuzamosan elemezzük
-    const CHUNK_SIZE = 15000;
+    const CHUNK_SIZE = 12000;
     const chunks = splitIntoChunks(text, CHUNK_SIZE);
     const chunksToAnalyze = chunks.length <= 3
       ? chunks
@@ -72,7 +78,6 @@ app.post('/api/analyze', async (req, res) => {
 
     console.log(`Elemzés: ${estPages} oldal, ${chunksToAnalyze.length} rész, nézőpont: ${perspNote}`);
 
-    // Párhuzamos elemzés minden részre
     const sectionPromises = chunksToAnalyze.map((chunk, idx) => {
       const pageFrom = Math.round(idx * (estPages / chunksToAnalyze.length)) + 1;
       const pageTo = Math.round((idx + 1) * (estPages / chunksToAnalyze.length));
@@ -113,17 +118,22 @@ Válaszolj CSAK JSON-ban:
 
       return client.messages.create({
         model: 'claude-sonnet-4-5',
-        max_tokens: 4000,
+        max_tokens: 2000,
         messages: [{ role: 'user', content: prompt }]
-      }).then(r => parseJSON(r.content[0].text)).catch(e => {
-        console.error('Chunk hiba:', e.message);
+      }).then(r => {
+        const raw = r.content[0].text;
+        console.log(`Chunk ${idx+1} raw:`, raw.substring(0, 300));
+        const parsed = parseJSON(raw);
+        console.log(`Chunk ${idx+1} kész: issues=${(parsed.issues||[]).length}`);
+        return parsed;
+      }).catch(e => {
+        console.error(`Chunk ${idx+1} hiba:`, e.message, e.status, e.error);
         return { score: 50, issues: [], missing: [], positives: [] };
       });
     });
 
     const sectionResults = await Promise.all(sectionPromises);
 
-    // Összegyűjtés
     let allIssues = [], allMissing = [], allPositives = [], scores = [], structure = {};
     for (const r of sectionResults) {
       if (r.score) scores.push(r.score);
@@ -133,7 +143,6 @@ Válaszolj CSAK JSON-ban:
       if (r.structure && r.structure.type) structure = r.structure;
     }
 
-    // Összefoglaló
     const avgScore = scores.length ? Math.round(scores.reduce((a,b) => a+b, 0) / scores.length) : 50;
     const topIssues = allIssues.slice(0,5).map(i => i.title).join(', ') || 'nincs';
 
@@ -160,7 +169,6 @@ Válaszolj CSAK JSON-ban:
     });
     const summary = parseJSON(sumResp.content[0].text);
 
-    // Dedup
     const seen = {};
     const dedupIssues = allIssues.filter(x => { const k = x.title||''; if(seen[k]) return false; seen[k]=true; return true; });
     const seenM = {};
@@ -191,7 +199,6 @@ Válaszolj CSAK JSON-ban:
   }
 });
 
-// GENERATE endpoint
 app.post('/api/generate', async (req, res) => {
   try {
     const { action, type, favor, party1, party2, amount, deadline, date, level, details, special } = req.body;
