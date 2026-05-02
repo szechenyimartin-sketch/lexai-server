@@ -47,7 +47,7 @@ function safeParseJSON(raw) {
 
 // Determinisztikus pontozás a talált problémák alapján
 function calculateScore(allIssues, allMissing, allPositives) {
-  let score = 60;
+  let score = 75;
   for (const issue of allIssues) {
     if (issue.severity === 'kritikus') score -= 12;
     else if (issue.severity === 'figyelmeztetés') score -= 6;
