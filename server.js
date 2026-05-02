@@ -70,7 +70,7 @@ app.post('/api/analyze', async (req, res) => {
     const estPages = Math.max(1, Math.round(text.length / 1800));
     const perspNote = buildPerspective(perspective);
 
-    const CHUNK_SIZE = 15000;
+    const CHUNK_SIZE = 12000;
     const chunks = splitIntoChunks(text, CHUNK_SIZE);
     const chunksToAnalyze = chunks.length <= 3
       ? chunks
@@ -118,7 +118,7 @@ Válaszolj CSAK JSON-ban:
 
       return client.messages.create({
         model: 'claude-sonnet-4-5',
-        max_tokens: 4000,
+        max_tokens: 8000,
         messages: [{ role: 'user', content: prompt }]
       }).then(r => {
         const raw = r.content[0].text;
