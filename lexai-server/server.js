@@ -75,7 +75,7 @@ app.post('/api/analyze', async (req, res) => {
 
       return client.messages.create({
         model: 'claude-sonnet-4-5',
-        max_tokens: 2000,
+        max_tokens: 4000,
         messages: [{ role: 'user', content: prompt }]
       }).then(r => {
         const raw = r.content[0].text;
@@ -168,7 +168,7 @@ app.post('/api/generate', async (req, res) => {
 
     if (action === 'hints') {
       const prompt = 'Magyar ügyvéd. Listázd mit kell egy "' + type + '" szerződésbe "' + favor + '" szerint.\nCsak nyers JSON: {"hints":[{"text":"STRING","importance":"must|rec|opt"}]}\n8-10 elem.';
-      const r = await client.messages.create({ model: 'claude-sonnet-4-5', max_tokens: 2000, messages: [{ role: 'user', content: prompt }] });
+      const r = await client.messages.create({ model: 'claude-sonnet-4-5', max_tokens: 4000, messages: [{ role: 'user', content: prompt }] });
       return res.json(safeParseJSON(r.content[0].text) || {hints:[]});
     }
 
