@@ -112,11 +112,13 @@ Válaszolj CSAK JSON-ban:
         max_tokens: 4000,
         messages: [{ role: 'user', content: prompt }]
       }).then(r => {
-        const parsed = parseJSON(r.content[0].text);
+        const raw = r.content[0].text;
+        console.log(`Chunk ${idx+1} raw:`, raw.substring(0, 300));
+        const parsed = parseJSON(raw);
         console.log(`Chunk ${idx+1} kész: issues=${(parsed.issues||[]).length}`);
         return parsed;
       }).catch(e => {
-        console.error(`Chunk ${idx+1} hiba:`, e.message);
+        console.error(`Chunk ${idx+1} hiba:`, e.message, e.status, e.error);
         return { score: 50, issues: [], missing: [], positives: [] };
       });
     });
