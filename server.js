@@ -10,10 +10,16 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 function parseJSON(raw) {
   if (!raw) return {};
-  let c = raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+  let c = raw
+    .replace(/^```json\s*/gim, '')
+    .replace(/^```\s*/gim, '')
+    .replace(/```$/gim, '')
+    .trim();
   const start = c.indexOf('{');
   if (start < 0) return {};
   c = c.substring(start);
+  const end = c.lastIndexOf('}');
+  if (end >= 0) c = c.substring(0, end + 1);
   try { return JSON.parse(c); } catch(e) {
     try {
       c = c.replace(/,\s*}/g, '}').replace(/,\s*]/g, ']');
@@ -21,7 +27,10 @@ function parseJSON(raw) {
       for(const ch of c){ if(ch==='{')op++; if(ch==='}')cl++; }
       for(let i=0;i<op-cl;i++) c+='}';
       return JSON.parse(c);
-    } catch(e2) { return {}; }
+    } catch(e2) {
+      console.error('parseJSON hiba:', e2.message);
+      return {};
+    }
   }
 }
 
