@@ -150,6 +150,8 @@ app.post('/api/analyze', async (req, res) => {
         }
       } catch(e) { console.error('Fel2 hátrány hiba:', e.message); }
 
+    } // for loop vége
+
     const avgS1 = s1arr.length ? Math.round(s1arr.reduce((a,b)=>a+b,0)/s1arr.length) : 50;
     const avgS2 = s2arr.length ? Math.round(s2arr.reduce((a,b)=>a+b,0)/s2arr.length) : 50;
     const topIssues = allIssues.slice(0,3).map(function(x){return x.title;}).join('; ') || 'nincs';
