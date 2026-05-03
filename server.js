@@ -144,102 +144,57 @@ app.post('/api/analyze', async (req, res) => {
       const fel1n = structure.fel1 || '1. fél';
       const fel2n = structure.fel2 || '2. fél';
 
-      // LÉPÉS 1b: Kontextus elemzés – ki kicsoda, mi az érdekük
-      let contextInfo = '';
+      // LÉPÉS 2: Átfogó elemzés – egy hívásban minden issue, az AI dönti el melyik félnek hátrányos
       try {
-        const rCtx = await client.messages.create({
+        const rIssues = await client.messages.create({
           model: 'claude-sonnet-4-5',
-          max_tokens: 600,
+          max_tokens: 3000,
           messages: [{ role: 'user', content:
-            'Szerződésrész (~' + pFrom + '-' + pTo + '. oldal):\n\n' + chunk.substring(0, 3000) + '\n\n' +
-            'Elemezd ki a két felet és érdekeiket. Csak ezt a JSON-t írd (TILOS ```json):\n' +
-            '{' +
-            '"fel1_rol":"' + fel1n + ' szerepe és érdekei 1-2 mondatban",' +
-            '"fel2_rol":"' + fel2n + ' szerepe és érdekei 1-2 mondatban",' +
-            '"fel1_elony":["3 dolog ami ' + fel1n + '-nek előnyös ebben a szerz. típusban"],' +
-            '"fel2_elony":["3 dolog ami ' + fel2n + '-nek előnyös ebben a szerz. típusban"],' +
-            '"fel1_hatrany":["3 tipikus kockázat ' + fel1n + ' számára"],' +
-            '"fel2_hatrany":["3 tipikus kockázat ' + fel2n + ' számára"]' +
-            '}'
-          }]
-        });
-        totalInputTokens += rCtx.usage.input_tokens;
-        totalOutputTokens += rCtx.usage.output_tokens;
-        const ctx = extractJSON(rCtx.content[0].text);
-        if (ctx) {
-          contextInfo = 
-            'KONTEXTUS:\n' +
-            fel1n + ' szerepe: ' + (ctx.fel1_rol || '') + '\n' +
-            fel2n + ' szerepe: ' + (ctx.fel2_rol || '') + '\n' +
-            fel1n + ' tipikus előnyei: ' + (ctx.fel1_elony || []).join(', ') + '\n' +
-            fel2n + ' tipikus előnyei: ' + (ctx.fel2_elony || []).join(', ') + '\n' +
-            fel1n + ' tipikus kockázatai: ' + (ctx.fel1_hatrany || []).join(', ') + '\n' +
-            fel2n + ' tipikus kockázatai: ' + (ctx.fel2_hatrany || []).join(', ') + '\n\n';
-          console.log('Kontextus kész chunk ' + (i+1));
-        }
-      } catch(e) { console.error('Kontextus hiba:', e.message); }
-
-      // LÉPÉS 2a: Fel1 hátrányos pontok
-      try {
-        const rA = await client.messages.create({
-          model: 'claude-sonnet-4-5',
-          max_tokens: 1500,
-          messages: [{ role: 'user', content:
-            problemPrompt +
-            contextInfo +
-            'Minden szerződésben van hátrányos pont mindkét félnek – keresd meg a TOP 4-et ami ' + fel1n + ' szempontjából HÁTRÁNYOS.\n' +
-            'Tipikusan hátrányos lehet: gyenge garancia a befektetés megtérülésére, korlátozott kontroll, kényszerkivásárlási kockázat, jogi bizonytalanságok.\n' +
-            'FONTOS: favors mezőbe mindig "fel2" kerüljön. Ha nem találsz 4-et, adj meg legalább 2-t.\n' +
+            'Szerződésrész (~' + pFrom + '-' + pTo + '. oldal):\n\n' + chunk + '\n\n' +
+            'FELEK:\n' +
+            '- ' + fel1n + ': a BEFEKTETŐ/ERŐSEBB FÉL (tőkét ad, jogokat kap)\n' +
+            '- ' + fel2n + ': az ALAPÍTÓ/GYENGÉBB FÉL (tőkét kap, kötelezettségeket vállal)\n\n' +
+            'SZABÁLYOK:\n' +
+            '- favors:"fel1" = ' + fel1n + '-nek KEDVEZ (azaz ' + fel2n + '-nek HÁTRÁNYOS)\n' +
+            '- favors:"fel2" = ' + fel2n + '-nek KEDVEZ (azaz ' + fel1n + '-nek HÁTRÁNYOS)\n' +
+            '- favors:"mindketto" = mindkét félnek hátrányos\n\n' +
+            'TIPIKUSAN ' + fel1n + '-nek KEDVEZŐ (favors:fel1): Drag-Along, lock-up, kényszereladás, hígulás elleni védelem csak befektetőnek, korlátozott átruházás\n' +
+            'TIPIKUSAN ' + fel2n + '-nek KEDVEZŐ (favors:fel2): alacsony IRR, gyenge exit garancia, korlátozott információs jog, befektető felelőssége korlátlan\n\n' +
+            'Azonosítsd a TOP 8 legsúlyosabb jogi problémát REÁLISAN – ne erőltesd mindkét félnek ugyanannyit!\n' +
             'JSON (TILOS ```json):\n' +
-            '{"issues":[{"sev":"kritikus|figyelmeztetés","title":"max 60 kar","loc":"fejezet (~' + pFrom + '.o)","favors":"fel2","desc":"miért hátrányos ' + fel1n + '-nek max 150 kar","fix":"konkrét javítás max 150 kar","impactA":"hatás ' + fel1n + '-re","impactB":"hatás ' + fel2n + '-re"}]}\n' +
-            'Ha nincs: {"issues":[]}'
+            '{"issues":[{' +
+            '"sev":"kritikus|figyelmeztetés",' +
+            '"title":"probléma neve max 60 kar",' +
+            '"loc":"fejezet (~' + pFrom + '.o)",' +
+            '"favors":"fel1|fel2|mindketto",' +
+            '"desc":"miért probléma és kinek hátrányos, max 200 kar",' +
+            '"fix":"konkrét javítás max 150 kar",' +
+            '"impactA":"hatás ' + fel1n + '-re",' +
+            '"impactB":"hatás ' + fel2n + '-re"' +
+            '}]}'
           }]
         });
-        totalInputTokens += rA.usage.input_tokens;
-        totalOutputTokens += rA.usage.output_tokens;
-        const resA = extractJSON(rA.content[0].text);
-        if (resA && resA.issues) {
-          resA.issues.forEach(issue => {
-            if (issue && issue.title) allIssues.push({
-              severity: issue.sev || 'figyelmeztetés',
-              title: issue.title, location: issue.loc || '',
-              favors: 'fel2', description: issue.desc || '',
-              fix_text: issue.fix || '', impactA: issue.impactA || '', impactB: issue.impactB || ''
-            });
+        totalInputTokens += rIssues.usage.input_tokens;
+        totalOutputTokens += rIssues.usage.output_tokens;
+        const resIssues = extractJSON(rIssues.content[0].text);
+        if (resIssues && resIssues.issues) {
+          resIssues.issues.forEach(issue => {
+            if (issue && issue.title) {
+              allIssues.push({
+                severity: issue.sev || 'figyelmeztetés',
+                title: issue.title,
+                location: issue.loc || '',
+                favors: issue.favors || 'mindketto',
+                description: issue.desc || '',
+                fix_text: issue.fix || '',
+                impactA: issue.impactA || '',
+                impactB: issue.impactB || ''
+              });
+            }
           });
         }
-      } catch(e) { console.error('Fel1 hátrány hiba:', e.message); }
-
-      // LÉPÉS 2b: Fel2 hátrányos pontok
-      try {
-        const rB = await client.messages.create({
-          model: 'claude-sonnet-4-5',
-          max_tokens: 1500,
-          messages: [{ role: 'user', content:
-            problemPrompt +
-            contextInfo +
-            'Keresd meg a TOP 4 problémát ami ' + fel2n + ' szempontjából HÁTRÁNYOS (azaz ' + fel1n + ' javára szól).\n' +
-            'FONTOS: favors mezőbe mindig "fel1" kerüljön (mert ' + fel1n + ' javára szól).\n' +
-            'A kontextus alapján pontosan tudd ki ' + fel2n + ' és mi az érdeke – csak olyan pontokat sorolj ami VALÓBAN neki hátrányos.\n' +
-            'JSON (TILOS ```json):\n' +
-            '{"issues":[{"sev":"kritikus|figyelmeztetés","title":"max 60 kar","loc":"fejezet (~' + pFrom + '.o)","favors":"fel1","desc":"miért hátrányos ' + fel2n + '-nek max 150 kar","fix":"konkrét javítás max 150 kar","impactA":"hatás ' + fel1n + '-re","impactB":"hatás ' + fel2n + '-re"}]}\n' +
-            'Ha nincs: {"issues":[]}'
-          }]
-        });
-        totalInputTokens += rB.usage.input_tokens;
-        totalOutputTokens += rB.usage.output_tokens;
-        const resB = extractJSON(rB.content[0].text);
-        if (resB && resB.issues) {
-          resB.issues.forEach(issue => {
-            if (issue && issue.title) allIssues.push({
-              severity: issue.sev || 'figyelmeztetés',
-              title: issue.title, location: issue.loc || '',
-              favors: 'fel1', description: issue.desc || '',
-              fix_text: issue.fix || '', impactA: issue.impactA || '', impactB: issue.impactB || ''
-            });
-          });
-        }
-      } catch(e) { console.error('Fel2 hátrány hiba:', e.message); }
+        console.log('Chunk ' + (i+1) + ' issues:', resIssues ? resIssues.issues.length : 0);
+      } catch(e) { console.error('Issue elemzés hiba:', e.message); }
 
     } // for loop vége
 
