@@ -59,28 +59,27 @@ const MOCK_RESULT = {
       description: 'Az ESOP reszesedések nincsenek külön jogosulthoz rendelve.', fix_text: 'Külön ESOP megallapodas keszitese.',
       impactA: 'Alapitok szavazati ereje bizonytalan', impactB: 'Befekteto 20%-os pozicioja bizonytalan' },
     { severity: 'kritikus', title: 'Minimalis exit garancia hianya', location: '6.2.5 (~5. oldal)', favors: 'fel2',
-      description: 'Nincs kötelező visszavasarlasi garancia.', fix_text: 'Exit garancia klauzula: 5 even belül visszavasarlas.',
+      description: 'Nincs kötelező visszavasarlasi garancia.', fix_text: 'Exit garancia klauzula beepitese.',
       impactA: 'Befekteto nem tudja kikenyszeriteni exitet', impactB: 'Alapitoknak kedvezo' },
     { severity: 'kritikus', title: 'Drag-Along kuszob tul alacsony', location: '7.3 (~7. oldal)', favors: 'fel1',
-      description: 'A Drag-Along jog 51%-os kuszöbon aktiválódik.', fix_text: 'Drag-Along kuszob 75-80%-ra emelese.',
+      description: 'Drag-Along 51%-on aktiválódik, kenyszereladas barmilyen aron.', fix_text: 'Drag-Along kuszob 75-80%-ra emelese.',
       impactA: 'Befekteto korlátlan hatalmat kap', impactB: 'Alapitok kiszolgáltatottsaga' },
     { severity: 'figyelmeztetés', title: 'Vesting utemezés nem reszletezett', location: '4.3 (~3. oldal)', favors: 'mindketto',
       description: 'Az ESOP program vesting ütemezese nincs reszletezve.', fix_text: '1 eves cliff, 4 eves linearis vesting.',
       impactA: 'Alapitok kontrollalatlanul rendelkezhetnek', impactB: 'Befekteto nem szamonkerheti' },
     { severity: 'figyelmeztetés', title: 'Informacios jogok korlatozottak', location: '8.1 (~8. oldal)', favors: 'fel2',
-      description: 'Nincs rendkivüli esemeny ertesitesi kötelezettség.', fix_text: 'MAC ertesitesi kötelezettség 5 munkanapon belül.',
+      description: 'Nincs rendkivüli esemeny ertesitesi kötelezettség.', fix_text: 'MAC ertesitesi 5 munkanapon belül.',
       impactA: 'Befekteto keson ertesül', impactB: 'Alapitokra adminisztrativ teher' }
   ],
   positives: [
     { title: 'Reszletes anti-dilucios vedelem', description: '' },
-    { title: 'Board megfigyeloi jog biztositott', description: '' },
-    { title: 'Egyertelmü szavazati jogok', description: '' }
+    { title: 'Board megfigyeloi jog biztositott', description: '' }
   ],
   structure: { fel1: 'Obudai Venture Capital Zrt.', fel2: 'Alapitok es Celtarsasag', type: 'Befektetesi szerzodes' },
   _pages: 12, _sections: 3, _mock: true
 };
 
-app.get('/', (req, res) => res.json({ status: 'LexAI Backend', version: '8.0', mock: MOCK_MODE }));
+app.get('/', (req, res) => res.json({ status: 'LexAI Backend', version: '9.0', mock: MOCK_MODE }));
 
 app.post('/api/analyze', async (req, res) => {
   try {
@@ -95,95 +94,124 @@ app.post('/api/analyze', async (req, res) => {
     console.log('Elemzes: ' + estPages + ' oldal, ' + toAnalyze.length + ' resz');
 
     const allIssues = [], allPositives = [], s1arr = [], s2arr = [];
-    let structure = {}, totalIn = 0, totalOut = 0;
+    let structure = {};
+    let totalIn = 0;
+    let totalOut = 0;
 
+    // LEPÉS 1: Felek azonositasa az első chunkból
+    try {
+      const r0 = await client.messages.create({
+        model: 'claude-sonnet-4-5', max_tokens: 400,
+        messages: [{ role: 'user', content:
+          toAnalyze[0].substring(0, 3000) + '\n\n' +
+          'Azonositsd a két felet és szerepüket.\n' +
+          'JSON (TILOS ```json):\n' +
+          '{"fel1":"fél1 neve","fel2":"fél2 neve","type":"szerz tipus",' +
+          '"fel1_ad":"mit ad fél1 (pl: tokét, bért, munkát)","fel2_ad":"mit ad fél2",' +
+          '"fel1_erős":true/false}'
+        }]
+      });
+      totalIn += r0.usage.input_tokens; totalOut += r0.usage.output_tokens;
+      const info0 = extractJSON(r0.content[0].text);
+      if (info0 && info0.fel1) {
+        structure = {
+          fel1: info0.fel1, fel2: info0.fel2, type: info0.type,
+          fel1_ad: info0.fel1_ad || '', fel2_ad: info0.fel2_ad || '',
+          fel1_eros: info0.fel1_erős !== false
+        };
+      }
+    } catch(e) { console.error('Felek azonositasa hiba:', e.message); }
+
+    const fel1n = structure.fel1 || '1. fel';
+    const fel2n = structure.fel2 || '2. fel';
+    const fel1ad = structure.fel1_ad || 'tokét/jogot ad';
+    const fel2ad = structure.fel2_ad || 'kötelezettséget vállal';
+
+    // LEPÉS 2: Minden chunkból klauzulák összegyujtése
     for (let i = 0; i < toAnalyze.length; i++) {
       const chunk = toAnalyze[i];
       const pFrom = Math.round(i * estPages / toAnalyze.length) + 1;
       const pTo = Math.round((i+1) * estPages / toAnalyze.length);
 
-      // LEPÉS 1: Alap info + felek azonositasa
+      // 2a: Score és pozitívumok
       try {
         const r1 = await client.messages.create({
-          model: 'claude-sonnet-4-5', max_tokens: 600,
+          model: 'claude-sonnet-4-5', max_tokens: 400,
           messages: [{ role: 'user', content:
-            'Szerződesrész (~' + pFrom + '-' + pTo + '. oldal):\n\n' + chunk.substring(0, 2000) + '\n\n' +
+            'Szerz. rész (~' + pFrom + '-' + pTo + '. oldal):\n\n' + chunk.substring(0, 2000) + '\n\n' +
             'JSON (TILOS ```json):\n' +
-            '{"fel1_score":NUMBER,"fel2_score":NUMBER,"fel1":"fél1 neve max 30 kar","fel2":"fél2 neve max 30 kar","fel1_szerep":"befekteto|berlo|munkaltato|vevo|egyeb","fel2_szerep":"alapito|berlő|munkavallaló|elado|egyeb","type":"szerzodes tipusa","pos1":"pozitivum","pos2":"pozitivum"}'
+            '{"fel1_score":NUMBER_0_100,"fel2_score":NUMBER_0_100,"pos1":"pozitivum","pos2":"pozitivum"}'
           }]
         });
         totalIn += r1.usage.input_tokens; totalOut += r1.usage.output_tokens;
-        const info = extractJSON(r1.content[0].text);
-        if (info) {
-          if (info.fel1_score) s1arr.push(info.fel1_score);
-          if (info.fel2_score) s2arr.push(info.fel2_score);
-          if (info.fel1 && !structure.fel1) structure = { fel1: info.fel1, fel2: info.fel2, type: info.type, fel1_szerep: info.fel1_szerep || 'egyeb', fel2_szerep: info.fel2_szerep || 'egyeb' };
-          if (info.pos1) allPositives.push({ title: info.pos1, description: '' });
-          if (info.pos2) allPositives.push({ title: info.pos2, description: '' });
+        const info1 = extractJSON(r1.content[0].text);
+        if (info1) {
+          if (info1.fel1_score) s1arr.push(info1.fel1_score);
+          if (info1.fel2_score) s2arr.push(info1.fel2_score);
+          if (info1.pos1) allPositives.push({ title: info1.pos1, description: '' });
+          if (info1.pos2) allPositives.push({ title: info1.pos2, description: '' });
         }
-      } catch(e) { console.error('Info hiba:', e.message); }
+      } catch(e) { console.error('Score hiba:', e.message); }
 
-      const fel1n = structure.fel1 || '1. fél';
-      const fel2n = structure.fel2 || '2. fél';
-      const fel1s = structure.fel1_szerep || 'egyeb';
-      const fel2s = structure.fel2_szerep || 'egyeb';
-
-      // LEPÉS 2: Minden issue egy hívásban - az AI látja a teljes kontextust
-      // A favors értéket a PROMPT alapján adjuk meg, NEM az AI dönti el
+      // 2b: Problémák gyujtése - CSAK a klauzula és leírás, favors nélkül
       try {
         const r2 = await client.messages.create({
-          model: 'claude-sonnet-4-5', max_tokens: 3000,
+          model: 'claude-sonnet-4-5', max_tokens: 2000,
           messages: [{ role: 'user', content:
-            'Szerződesrész (~' + pFrom + '-' + pTo + '. oldal):\n\n' + chunk + '\n\n' +
-            '=== KI KICSODA ===\n' +
-            fel1n + ' = ' + fel1s.toUpperCase() + ' (ez a TŐKEERŐSEBB, JOGOKKAL RENDELKEZŐ fél)\n' +
-            fel2n + ' = ' + fel2s.toUpperCase() + ' (ez a KÖTELEZETTSÉGEKET VÁLLALÓ, KISZOLGÁLTATOTTABB fél)\n\n' +
-            '=== FELADAT ===\n' +
-            'Azonosítsd a szerződes ÖSSZES lényeges problémáját. Minden issue-nál döntsd el:\n' +
-            '- Ha a klauzula a ' + fel1n + ' TŐKEERŐS félnek hátrányos -> favors:"fel2"\n' +
-            '- Ha a klauzula a ' + fel2n + ' KISZOLGÁLTATOTT félnek hátrányos -> favors:"fel1"\n' +
-            '- Ha mindkettőnek hátrányos -> favors:"mindketto"\n\n' +
-            'FONTOS SZABÁLYOK:\n' +
-            '1. Egy befektetési szerződesben TIPIKUSAN az alapítónak több hátrányos pontja van\n' +
-            '2. Ha nincs valódi hátrány az egyik félnek, írj kevesebbet - ne erőltesd\n' +
-            '3. Adj meg MINIMUM 3, MAXIMUM 8 issue-t összesen\n\n' +
+            'Szerz. rész (~' + pFrom + '-' + pTo + '. oldal):\n\n' + chunk + '\n\n' +
+            'Gyujtsd össze a 6 legfontosabb problémás klauzulát.\n' +
+            'Minden klauzulánál EGYETLEN kérdés: "Ez a klauzula ' + fel1n + '-nek vagy ' + fel2n + '-nek KEDVEZŐ?"\n' +
+            '- Ha ' + fel1n + '-nek kedvező (mert ' + fel1ad + '): kedvez="fel1"\n' +
+            '- Ha ' + fel2n + '-nek kedvező (mert ' + fel2ad + '): kedvez="fel2"\n' +
+            '- Ha mindkettőnek rossz: kedvez="mindketto"\n\n' +
             'JSON (TILOS ```json):\n' +
-            '{"issues":[{"sev":"kritikus|figyelmeztetés","title":"max 60 kar","loc":"fejezet (~' + pFrom + '.o)","favors":"fel1|fel2|mindketto","desc":"miért probléma és KINEK hátrányos konkrétan","fix":"konkrét javítás","impactA":"hatás ' + fel1n + '-re","impactB":"hatás ' + fel2n + '-re"}]}'
+            '{"klauzulak":[{' +
+            '"sev":"kritikus|figyelmeztetés",' +
+            '"title":"klauzula neve max 60 kar",' +
+            '"loc":"fejezet (~' + pFrom + '.o)",' +
+            '"kedvez":"fel1|fel2|mindketto",' +
+            '"desc":"mi a probléma és miért kedvez annak a félnek max 150 kar",' +
+            '"fix":"konkrét javítás max 150 kar",' +
+            '"impactA":"hatás ' + fel1n + '-re",' +
+            '"impactB":"hatás ' + fel2n + '-re"' +
+            '}]}'
           }]
         });
         totalIn += r2.usage.input_tokens; totalOut += r2.usage.output_tokens;
         const res2 = extractJSON(r2.content[0].text);
-        if (res2 && res2.issues) {
-          res2.issues.forEach(issue => {
-            if (issue && issue.title) {
+        if (res2 && res2.klauzulak) {
+          res2.klauzulak.forEach(k => {
+            if (k && k.title) {
+              // kedvez="fel1" azt jelenti fel1-nek KEDVEZŐ = fel2-nek HÁTRÁNYOS
+              // Tehat favors=kedvez (azt a felet jelöli aki NYER ebből)
               allIssues.push({
-                severity: issue.sev || 'figyelmeztetés',
-                title: issue.title, location: issue.loc || '',
-                favors: issue.favors || 'mindketto',
-                description: issue.desc || '',
-                fix_text: issue.fix || '',
-                impactA: issue.impactA || '',
-                impactB: issue.impactB || ''
+                severity: k.sev || 'figyelmeztetés',
+                title: k.title,
+                location: k.loc || '',
+                favors: k.kedvez || 'mindketto',
+                description: k.desc || '',
+                fix_text: k.fix || '',
+                impactA: k.impactA || '',
+                impactB: k.impactB || ''
               });
             }
           });
         }
-        console.log('Chunk ' + (i+1) + ': ' + (res2 && res2.issues ? res2.issues.length : 0) + ' issue');
-      } catch(e) { console.error('Issue hiba:', e.message); }
+        console.log('Chunk ' + (i+1) + ': ' + (res2 && res2.klauzulak ? res2.klauzulak.length : 0) + ' klauzula');
+      } catch(e) { console.error('Klauzula hiba:', e.message); }
     }
-
-    const avgS1 = s1arr.length ? Math.round(s1arr.reduce((a,b)=>a+b,0)/s1arr.length) : 50;
-    const avgS2 = s2arr.length ? Math.round(s2arr.reduce((a,b)=>a+b,0)/s2arr.length) : 50;
 
     // Deduplikáció
     function getKW(t) { return t.toLowerCase().split(/\s+/).filter(w => w.length > 4); }
     function isSim(a, b) { return a === b || getKW(a).filter(w => getKW(b).includes(w)).length >= 2; }
     const dedup = allIssues.filter((x, i, arr) => !arr.slice(0, i).some(p => isSim(p.title, x.title)));
 
-    // Sulyozott scoring az issue-k alapjan
-    const fel1Issues = dedup.filter(x => x.favors === 'fel2');
-    const fel2Issues = dedup.filter(x => x.favors === 'fel1');
-    const bothIssues = dedup.filter(x => x.favors === 'mindketto');
+    // Scoring:
+    // favors='fel1' = fel1-nek KEDVEZŐ = fel2-nek HÁTRÁNYOS -> fel2 hátrány pontja nő
+    // favors='fel2' = fel2-nek KEDVEZŐ = fel1-nek HÁTRÁNYOS -> fel1 hátrány pontja nő
+    const fel1Hatrany = dedup.filter(x => x.favors === 'fel2'); // fel2 kedvez = fel1 hátrány
+    const fel2Hatrany = dedup.filter(x => x.favors === 'fel1'); // fel1 kedvez = fel2 hátrány
+    const mindketto = dedup.filter(x => x.favors === 'mindketto');
 
     function calcW(issues, shared) {
       let s = 0;
@@ -192,26 +220,33 @@ app.post('/api/analyze', async (req, res) => {
       return s;
     }
 
-    const w1 = calcW(fel1Issues, bothIssues);
-    const w2 = calcW(fel2Issues, bothIssues);
+    const w1 = calcW(fel1Hatrany, mindketto); // fel1 hátrányai
+    const w2 = calcW(fel2Hatrany, mindketto); // fel2 hátrányai
     const total = w1 + w2 || 1;
 
-    // Vedettség: kevesebb hátrány = magasabb védettség
+    // Védettség: kevesebb hátrány = magasabb védettség
     const prot1 = Math.round((1 - w1/total) * 100);
     const prot2 = Math.round((1 - w2/total) * 100);
 
+    const avgS1 = s1arr.length ? Math.round(s1arr.reduce((a,b)=>a+b,0)/s1arr.length) : 50;
+    const avgS2 = s2arr.length ? Math.round(s2arr.reduce((a,b)=>a+b,0)/s2arr.length) : 50;
+
     // Összefoglaló
-    const topIssues = dedup.slice(0,3).map(x=>x.title).join('; ') || 'nincs';
     let sum = {};
     try {
+      const topIssues = dedup.slice(0,3).map(x=>x.title).join('; ') || 'nincs';
       const sumR = await client.messages.create({
         model: 'claude-sonnet-4-5', max_tokens: 500,
         messages: [{ role: 'user', content:
-          structure.fel1 + ' vedettség: ' + prot1 + '% (' + fel1Issues.length + ' hátrányos pont)\n' +
-          structure.fel2 + ' vedettség: ' + prot2 + '% (' + fel2Issues.length + ' hátrányos pont)\n' +
-          'Főbb problémák: ' + topIssues + '\n\n' +
+          fel1n + ' hátrányos pontjai (' + fel1Hatrany.length + '): ' + fel1Hatrany.map(x=>x.title).join(', ') + '\n' +
+          fel2n + ' hátrányos pontjai (' + fel2Hatrany.length + '): ' + fel2Hatrany.map(x=>x.title).join(', ') + '\n\n' +
+          'Adj összefoglalót.\n' +
           'JSON (TILOS ```json):\n' +
-          '{"verdict":"max 10 szó","p1":' + prot1 + ',"p2":' + prot2 + ',"merleg":"fel1_eros|fel2_eros|kiegyensulyozott","summary":"3 mondatos összefoglaló","j1a":"javaslat ' + (structure.fel1||'fél1') + '","j1b":"javaslat","j2a":"javaslat ' + (structure.fel2||'fél2') + '","j2b":"javaslat","a1":"teendő","a2":"teendő","a3":"teendő"}'
+          '{"verdict":"max 10 szó","merleg":"fel1_eros|fel2_eros|kiegyensulyozott",' +
+          '"summary":"3 mondatos összefoglaló mindkét félről",' +
+          '"j1a":"javaslat ' + fel1n + '","j1b":"javaslat",' +
+          '"j2a":"javaslat ' + fel2n + '","j2b":"javaslat",' +
+          '"a1":"legsürgősebb teendő","a2":"teendő","a3":"teendő"}'
         }]
       });
       totalIn += sumR.usage.input_tokens; totalOut += sumR.usage.output_tokens;
@@ -219,15 +254,14 @@ app.post('/api/analyze', async (req, res) => {
     } catch(e) { console.error('Summary hiba:', e.message); }
 
     const cost = estimateCost(totalIn, totalOut);
-    console.log('KESZ: ' + dedup.length + ' issue | ' + cost.cost_huf + ' Ft');
+    console.log('KESZ: ' + dedup.length + ' issue | ' + cost.cost_huf + ' Ft | prot1=' + prot1 + '% prot2=' + prot2 + '%');
 
     res.json({
       fel1_score: prot1, fel2_score: prot2,
-      fel1_name: structure.fel1 || '1. Fél',
-      fel2_name: structure.fel2 || '2. Fél',
+      fel1_name: fel1n, fel2_name: fel2n,
       per_esely_fel1: prot1, per_esely_fel2: prot2,
       merleg: sum.merleg || (prot1 > prot2 ? 'fel1_eros' : 'fel2_eros'),
-      score: Math.round((prot1+prot2)/2),
+      score: Math.round((avgS1+avgS2)/2),
       verdict: sum.verdict || 'Az elemzés elkészült.',
       summary: sum.summary || 'Az elemzés elkészült.',
       top_actions: [sum.a1, sum.a2, sum.a3].filter(Boolean),
@@ -252,7 +286,7 @@ app.post('/api/generate', async (req, res) => {
     if (action === 'hints') {
       const r = await client.messages.create({
         model: 'claude-sonnet-4-5', max_tokens: 2000,
-        messages: [{ role: 'user', content: 'Magyar ügyvéd. Mit kell egy "' + type + '" szerződesbe "' + favor + '" szerint.\nJSON: {"hints":[{"text":"STRING","importance":"must|rec|opt"}]}' }]
+        messages: [{ role: 'user', content: 'Magyar ügyvéd. Mit kell egy "' + type + '" szerződésbe "' + favor + '" szerint.\nJSON: {"hints":[{"text":"STRING","importance":"must|rec|opt"}]}' }]
       });
       return res.json(extractJSON(r.content[0].text) || { hints: [] });
     }
