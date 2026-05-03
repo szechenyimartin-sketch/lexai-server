@@ -144,6 +144,41 @@ app.post('/api/analyze', async (req, res) => {
       const fel1n = structure.fel1 || '1. fél';
       const fel2n = structure.fel2 || '2. fél';
 
+      // LÉPÉS 1b: Kontextus elemzés – ki kicsoda, mi az érdekük
+      let contextInfo = '';
+      try {
+        const rCtx = await client.messages.create({
+          model: 'claude-sonnet-4-5',
+          max_tokens: 600,
+          messages: [{ role: 'user', content:
+            'Szerződésrész (~' + pFrom + '-' + pTo + '. oldal):\n\n' + chunk.substring(0, 3000) + '\n\n' +
+            'Elemezd ki a két felet és érdekeiket. Csak ezt a JSON-t írd (TILOS ```json):\n' +
+            '{' +
+            '"fel1_rol":"' + fel1n + ' szerepe és érdekei 1-2 mondatban",' +
+            '"fel2_rol":"' + fel2n + ' szerepe és érdekei 1-2 mondatban",' +
+            '"fel1_elony":["3 dolog ami ' + fel1n + '-nek előnyös ebben a szerz. típusban"],' +
+            '"fel2_elony":["3 dolog ami ' + fel2n + '-nek előnyös ebben a szerz. típusban"],' +
+            '"fel1_hatrany":["3 tipikus kockázat ' + fel1n + ' számára"],' +
+            '"fel2_hatrany":["3 tipikus kockázat ' + fel2n + ' számára"]' +
+            '}'
+          }]
+        });
+        totalInputTokens += rCtx.usage.input_tokens;
+        totalOutputTokens += rCtx.usage.output_tokens;
+        const ctx = extractJSON(rCtx.content[0].text);
+        if (ctx) {
+          contextInfo = 
+            'KONTEXTUS:\n' +
+            fel1n + ' szerepe: ' + (ctx.fel1_rol || '') + '\n' +
+            fel2n + ' szerepe: ' + (ctx.fel2_rol || '') + '\n' +
+            fel1n + ' tipikus előnyei: ' + (ctx.fel1_elony || []).join(', ') + '\n' +
+            fel2n + ' tipikus előnyei: ' + (ctx.fel2_elony || []).join(', ') + '\n' +
+            fel1n + ' tipikus kockázatai: ' + (ctx.fel1_hatrany || []).join(', ') + '\n' +
+            fel2n + ' tipikus kockázatai: ' + (ctx.fel2_hatrany || []).join(', ') + '\n\n';
+          console.log('Kontextus kész chunk ' + (i+1));
+        }
+      } catch(e) { console.error('Kontextus hiba:', e.message); }
+
       // LÉPÉS 2a: Fel1 hátrányos pontok
       try {
         const rA = await client.messages.create({
@@ -151,8 +186,10 @@ app.post('/api/analyze', async (req, res) => {
           max_tokens: 1500,
           messages: [{ role: 'user', content:
             problemPrompt +
+            contextInfo +
             'Keresd meg a TOP 4 problémát ami ' + fel1n + ' szempontjából HÁTRÁNYOS (azaz ' + fel2n + ' javára szól).\n' +
             'FONTOS: favors mezőbe mindig "fel2" kerüljön (mert ' + fel2n + ' javára szól).\n' +
+            'A kontextus alapján pontosan tudd ki ' + fel1n + ' és mi az érdeke – csak olyan pontokat sorolj ami VALÓBAN neki hátrányos.\n' +
             'JSON (TILOS ```json):\n' +
             '{"issues":[{"sev":"kritikus|figyelmeztetés","title":"max 60 kar","loc":"fejezet (~' + pFrom + '.o)","favors":"fel2","desc":"miért hátrányos ' + fel1n + '-nek max 150 kar","fix":"konkrét javítás max 150 kar","impactA":"hatás ' + fel1n + '-re","impactB":"hatás ' + fel2n + '-re"}]}\n' +
             'Ha nincs: {"issues":[]}'
@@ -180,8 +217,10 @@ app.post('/api/analyze', async (req, res) => {
           max_tokens: 1500,
           messages: [{ role: 'user', content:
             problemPrompt +
+            contextInfo +
             'Keresd meg a TOP 4 problémát ami ' + fel2n + ' szempontjából HÁTRÁNYOS (azaz ' + fel1n + ' javára szól).\n' +
             'FONTOS: favors mezőbe mindig "fel1" kerüljön (mert ' + fel1n + ' javára szól).\n' +
+            'A kontextus alapján pontosan tudd ki ' + fel2n + ' és mi az érdeke – csak olyan pontokat sorolj ami VALÓBAN neki hátrányos.\n' +
             'JSON (TILOS ```json):\n' +
             '{"issues":[{"sev":"kritikus|figyelmeztetés","title":"max 60 kar","loc":"fejezet (~' + pFrom + '.o)","favors":"fel1","desc":"miért hátrányos ' + fel2n + '-nek max 150 kar","fix":"konkrét javítás max 150 kar","impactA":"hatás ' + fel1n + '-re","impactB":"hatás ' + fel2n + '-re"}]}\n' +
             'Ha nincs: {"issues":[]}'
