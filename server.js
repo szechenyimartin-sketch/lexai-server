@@ -187,9 +187,9 @@ app.post('/api/analyze', async (req, res) => {
           messages: [{ role: 'user', content:
             problemPrompt +
             contextInfo +
-            'Keresd meg a TOP 4 problémát ami ' + fel1n + ' szempontjából HÁTRÁNYOS (azaz ' + fel2n + ' javára szól).\n' +
-            'FONTOS: favors mezőbe mindig "fel2" kerüljön (mert ' + fel2n + ' javára szól).\n' +
-            'A kontextus alapján pontosan tudd ki ' + fel1n + ' és mi az érdeke – csak olyan pontokat sorolj ami VALÓBAN neki hátrányos.\n' +
+            'Minden szerződésben van hátrányos pont mindkét félnek – keresd meg a TOP 4-et ami ' + fel1n + ' szempontjából HÁTRÁNYOS.\n' +
+            'Tipikusan hátrányos lehet: gyenge garancia a befektetés megtérülésére, korlátozott kontroll, kényszerkivásárlási kockázat, jogi bizonytalanságok.\n' +
+            'FONTOS: favors mezőbe mindig "fel2" kerüljön. Ha nem találsz 4-et, adj meg legalább 2-t.\n' +
             'JSON (TILOS ```json):\n' +
             '{"issues":[{"sev":"kritikus|figyelmeztetés","title":"max 60 kar","loc":"fejezet (~' + pFrom + '.o)","favors":"fel2","desc":"miért hátrányos ' + fel1n + '-nek max 150 kar","fix":"konkrét javítás max 150 kar","impactA":"hatás ' + fel1n + '-re","impactB":"hatás ' + fel2n + '-re"}]}\n' +
             'Ha nincs: {"issues":[]}'
@@ -243,19 +243,50 @@ app.post('/api/analyze', async (req, res) => {
 
     } // for loop vége
 
+    // Súlyozott issue számolás: kritikus=3 pont, figyelmeztetés=1 pont
+    const fel1Issues = allIssues.filter(x => x.favors === 'fel2'); // fel2 javára = fel1 hátrány
+    const fel2Issues = allIssues.filter(x => x.favors === 'fel1'); // fel1 javára = fel2 hátrány
+    const mindkettIssues = allIssues.filter(x => x.favors === 'mindketto');
+
+    function calcScore(issues, sharedIssues) {
+      let score = 0;
+      issues.forEach(i => { score += i.severity === 'kritikus' ? 3 : 1; });
+      sharedIssues.forEach(i => { score += i.severity === 'kritikus' ? 1.5 : 0.5; });
+      return score;
+    }
+
+    const fel1Score = calcScore(fel1Issues, mindkettIssues); // hátrányos pontok súlya fel1-nek
+    const fel2Score = calcScore(fel2Issues, mindkettIssues); // hátrányos pontok súlya fel2-nek
+    const totalScore = fel1Score + fel2Score || 1;
+
+    // Védettség: minél kevesebb hátrányos pont, annál védettebb
     const avgS1 = s1arr.length ? Math.round(s1arr.reduce((a,b)=>a+b,0)/s1arr.length) : 50;
     const avgS2 = s2arr.length ? Math.round(s2arr.reduce((a,b)=>a+b,0)/s2arr.length) : 50;
+
+    // Védettségi arány az issue-k alapján (fordított: több hátrány = alacsonyabb védettség)
+    const issueBasedFel1Protection = Math.round((1 - fel1Score/totalScore) * 100);
+    const issueBasedFel2Protection = Math.round((1 - fel2Score/totalScore) * 100);
+
+    // Kombináljuk a score-t és az issue-alapú számítást
+    const finalFel1 = Math.round((avgS1 * 0.4 + issueBasedFel1Protection * 0.6));
+    const finalFel2 = Math.round((avgS2 * 0.4 + issueBasedFel2Protection * 0.6));
+
     const topIssues = allIssues.slice(0,3).map(x=>x.title).join('; ') || 'nincs';
+
+    const fel1IssueList = fel1Issues.slice(0,5).map(x=>x.title).join(', ') || 'nincs';
+    const fel2IssueList = fel2Issues.slice(0,5).map(x=>x.title).join(', ') || 'nincs';
 
     const sumR = await client.messages.create({
       model: 'claude-sonnet-4-5',
-      max_tokens: 500,
+      max_tokens: 600,
       messages: [{ role: 'user', content:
-        '1.fél:' + (structure.fel1||'Ügyfél') + ' ' + avgS1 + '/100. 2.fél:' + (structure.fel2||'Szolgáltató') + ' ' + avgS2 + '/100.\n' +
-        'Problémák:' + topIssues + '\n' +
-        'Feladat: Becsüld meg a nyerési esélyeket (p1+p2=100!).\n' +
+        structure.fel1 + ' (' + fel1Issues.length + ' hátrányos pont, súly:' + fel1Score.toFixed(1) + '): ' + fel1IssueList + '\n' +
+        structure.fel2 + ' (' + fel2Issues.length + ' hátrányos pont, súly:' + fel2Score.toFixed(1) + '): ' + fel2IssueList + '\n' +
+        'Mindkét felet érintő: ' + mindkettIssues.length + ' pont\n\n' +
+        'Feladat: Adj összefoglalót és válaszd meg a mérleget. A nyerési esélyek (p1+p2=100) TÜKRÖZZÉK a hátrányos pontok arányát!\n' +
+        'Ha ' + structure.fel1 + '-nak ' + fel1Issues.length + ' hátrányos pontja van és ' + structure.fel2 + '-nak ' + fel2Issues.length + ', akkor a több hátrányos ponttal rendelkező fél p értéke ALACSONYABB legyen.\n' +
         'JSON (TILOS ```json):\n' +
-        '{"verdict":"összítélet max 10 szó","p1":SZAM,"p2":SZAM,"merleg":"fel1_eros|fel2_eros|kiegyensulyozott","summary":"3 mondatos összefoglaló","j1a":"javaslat fél1","j1b":"javaslat fél1","j2a":"javaslat fél2","j2b":"javaslat fél2","a1":"teendő","a2":"teendő","a3":"teendő"}'
+        '{"verdict":"összítélet max 10 szó","p1":SZAM,"p2":SZAM,"merleg":"fel1_eros|fel2_eros|kiegyensulyozott","summary":"3 mondatos összefoglaló mindkét fél helyzetéről","j1a":"javaslat ' + (structure.fel1||'fél1') + '","j1b":"javaslat ' + (structure.fel1||'fél1') + '","j2a":"javaslat ' + (structure.fel2||'fél2') + '","j2b":"javaslat ' + (structure.fel2||'fél2') + '","a1":"legsürgősebb teendő","a2":"teendő","a3":"teendő"}'
       }]
     });
     totalInputTokens += sumR.usage.input_tokens;
@@ -279,11 +310,11 @@ app.post('/api/analyze', async (req, res) => {
     console.log('KÉSZ: s1=' + avgS1 + ' s2=' + avgS2 + ' issues=' + dedup.length + ' | ~' + cost.cost_huf + ' Ft');
 
     res.json({
-      fel1_score: avgS1, fel2_score: avgS2,
+      fel1_score: finalFel1, fel2_score: finalFel2,
       fel1_name: structure.fel1 || '1. Fél',
       fel2_name: structure.fel2 || '2. Fél',
-      per_esely_fel1: sum.p1 || Math.round(avgS1/(avgS1+avgS2)*100),
-      per_esely_fel2: sum.p2 || Math.round(avgS2/(avgS1+avgS2)*100),
+      per_esely_fel1: sum.p1 || issueBasedFel1Protection,
+      per_esely_fel2: sum.p2 || issueBasedFel2Protection,
       merleg: sum.merleg || 'kiegyensulyozott',
       score: Math.round((avgS1+avgS2)/2),
       verdict: sum.verdict || 'Az elemzés elkészült.',
