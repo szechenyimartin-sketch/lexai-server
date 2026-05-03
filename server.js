@@ -144,21 +144,32 @@ app.post('/api/analyze', async (req, res) => {
       const fel1n = structure.fel1 || '1. fél';
       const fel2n = structure.fel2 || '2. fél';
 
-      // LÉPÉS 2a: Mi hátrányos FEL1-nek? (favors:'fel2' hardcoded)
+      // LÉPÉS 2a: FEL1 (BEFEKTETŐ) hátrányai - favors:'fel2' HARDCODED
       try {
         const rA = await client.messages.create({
           model: 'claude-sonnet-4-5',
           max_tokens: 1500,
           messages: [{ role: 'user', content:
             'Szerződésrész (~' + pFrom + '-' + pTo + '. oldal):\n\n' + chunk + '\n\n' +
-            'KI A KÉT FÉL:\n' +
-            '- ' + fel1n + ' = BEFEKTETŐ (pénzt ad, jogokat vár)\n' +
-            '- ' + fel2n + ' = ALAPÍTÓ/CÉLTÁRSASÁG (pénzt kap, kötelezettséget vállal)\n\n' +
-            'FELADAT: Keresd meg azt a TOP 4 klauzulát ami ' + fel1n + ' BEFEKTETŐNEK HÁTRÁNYOS.\n' +
-            'Tipikusan hátrányos a BEFEKTETŐNEK: gyenge exit garancia, alacsony IRR, korlátozott információs jog, befektető felelőssége korlátlan, gyenge szavazati jog.\n' +
-            'NE sorold fel ami a befektetőnek JÓ (pl. Drag-Along, lock-up, hígulás elleni védelem – ezek a befektető jogai!).\n' +
+            '=== SZEREPEK ===\n' +
+            fel1n + ' = BEFEKTETŐ: pénzt ad be, hozamot vár, kisebbségi tulajdonos\n' +
+            fel2n + ' = ALAPÍTÓ/CÉLTÁRSASÁG: pénzt kap, operatív irányít, többségi tulajdonos\n\n' +
+            '=== FELADAT ===\n' +
+            'Keresd meg a TOP 4 pontot ami ' + fel1n + ' BEFEKTETŐNEK HÁTRÁNYOS.\n\n' +
+            '=== BEFEKTETŐNEK TIPIKUSAN HÁTRÁNYOS ===\n' +
+            '- Gyenge vagy hiányzó exit garancia (nem tudja kivonni a pénzét)\n' +
+            '- Alacsony vagy garantálatlan hozam\n' +
+            '- Korlátozott információs jog (nem látja mi történik)\n' +
+            '- Gyenge szavazati jog stratégiai döntéseknél\n' +
+            '- Befektető felelőssége korlátlan\n' +
+            '- Nem érvényesíthető anti-dilúciós képlet\n\n' +
+            '=== BEFEKTETŐNEK NEM HÁTRÁNYOS (ne sorold fel!) ===\n' +
+            '- Drag-Along jog (ez a befektető JOGA, nem hátránya)\n' +
+            '- Lock-up az alapítókra (ez a befektetőt VÉDI)\n' +
+            '- Hígulás elleni védelem (ez a befektetőnek JÓ)\n' +
+            '- ESOP bizonytalanság (ez az ALAPÍTÓNAK hátrányos)\n\n' +
             'JSON (TILOS ```json):\n' +
-            '{"issues":[{"sev":"kritikus|figyelmeztetés","title":"max 60 kar","loc":"fejezet (~' + pFrom + '.o)","desc":"miért hátrányos ' + fel1n + '-nek max 150 kar","fix":"konkrét javítás max 150 kar","impactA":"hatás ' + fel1n + '-re","impactB":"hatás ' + fel2n + '-re"}]}\n' +
+            '{"issues":[{"sev":"kritikus|figyelmeztetés","title":"max 60 kar","loc":"fejezet (~' + pFrom + '.o)","desc":"miért hátrányos ' + fel1n + ' BEFEKTETŐNEK","fix":"konkrét javítás","impactA":"hatás befektetőre","impactB":"hatás alapítóra"}]}\n' +
             'Ha valóban nincs ilyen: {"issues":[]}'
           }]
         });
@@ -170,7 +181,7 @@ app.post('/api/analyze', async (req, res) => {
             if (issue && issue.title) allIssues.push({
               severity: issue.sev || 'figyelmeztetés',
               title: issue.title, location: issue.loc || '',
-              favors: 'fel2', // HARDCODED: hátrányos fel1-nek = fel2-nek kedvez
+              favors: 'fel2', // HARDCODED: hátrányos befektetőnek = alapítónak kedvez
               description: issue.desc || '',
               fix_text: issue.fix || '',
               impactA: issue.impactA || '',
@@ -180,21 +191,31 @@ app.post('/api/analyze', async (req, res) => {
         }
       } catch(e) { console.error('Fel1 hátrány hiba:', e.message); }
 
-      // LÉPÉS 2b: Mi hátrányos FEL2-nek? (favors:'fel1' hardcoded)
+      // LÉPÉS 2b: FEL2 (ALAPÍTÓ) hátrányai - favors:'fel1' HARDCODED
       try {
         const rB = await client.messages.create({
           model: 'claude-sonnet-4-5',
           max_tokens: 1500,
           messages: [{ role: 'user', content:
             'Szerződésrész (~' + pFrom + '-' + pTo + '. oldal):\n\n' + chunk + '\n\n' +
-            'KI A KÉT FÉL:\n' +
-            '- ' + fel1n + ' = BEFEKTETŐ (pénzt ad, jogokat vár)\n' +
-            '- ' + fel2n + ' = ALAPÍTÓ/CÉLTÁRSASÁG (pénzt kap, kötelezettséget vállal)\n\n' +
-            'FELADAT: Keresd meg azt a TOP 4 klauzulát ami ' + fel2n + ' ALAPÍTÓNAK/CÉLTÁRSASÁGNAK HÁTRÁNYOS.\n' +
-            'Tipikusan hátrányos az ALAPÍTÓNAK: Drag-Along kényszereladás, lock-up korlátok, hígulás, korlátozott átruházás, kényszerkivásárlás alacsony áron, ESOP bizonytalanság.\n' +
-            'NE sorold fel ami az alapítónak JÓ (pl. tőkebevonás, alacsony IRR kötelezettség az alapítónak – ez az alapítónak kedvező!).\n' +
+            '=== SZEREPEK ===\n' +
+            fel1n + ' = BEFEKTETŐ: pénzt ad be, hozamot vár, kisebbségi tulajdonos\n' +
+            fel2n + ' = ALAPÍTÓ/CÉLTÁRSASÁG: pénzt kap, operatív irányít, többségi tulajdonos\n\n' +
+            '=== FELADAT ===\n' +
+            'Keresd meg a TOP 4 pontot ami ' + fel2n + ' ALAPÍTÓNAK/CÉLTÁRSASÁGNAK HÁTRÁNYOS.\n\n' +
+            '=== ALAPÍTÓNAK TIPIKUSAN HÁTRÁNYOS ===\n' +
+            '- Drag-Along: befektető kényszereladásra kötelezheti az alapítót\n' +
+            '- Lock-up: alapító nem adhatja el részvényeit\n' +
+            '- Hígulás: új befektetésnél az alapító részesedése csökken\n' +
+            '- ESOP bizonytalanság: alapító elveszítheti opciós jogait\n' +
+            '- Kényszerkivásárlás alacsony áron\n' +
+            '- Korlátozott döntéshozatali jog\n\n' +
+            '=== ALAPÍTÓNAK NEM HÁTRÁNYOS (ne sorold fel!) ===\n' +
+            '- Alacsony IRR (ez a befektetőnek rossz, az alapítónak JÓ)\n' +
+            '- Gyenge exit garancia (ez a befektetőnek hátrányos, alapítónak jó)\n' +
+            '- Korlátozott befektetői info jog (ez az alapítónak jó)\n\n' +
             'JSON (TILOS ```json):\n' +
-            '{"issues":[{"sev":"kritikus|figyelmeztetés","title":"max 60 kar","loc":"fejezet (~' + pFrom + '.o)","desc":"miért hátrányos ' + fel2n + '-nek max 150 kar","fix":"konkrét javítás max 150 kar","impactA":"hatás ' + fel1n + '-re","impactB":"hatás ' + fel2n + '-re"}]}\n' +
+            '{"issues":[{"sev":"kritikus|figyelmeztetés","title":"max 60 kar","loc":"fejezet (~' + pFrom + '.o)","desc":"miért hátrányos ' + fel2n + ' ALAPÍTÓNAK","fix":"konkrét javítás","impactA":"hatás befektetőre","impactB":"hatás alapítóra"}]}\n' +
             'Ha valóban nincs ilyen: {"issues":[]}'
           }]
         });
@@ -206,7 +227,7 @@ app.post('/api/analyze', async (req, res) => {
             if (issue && issue.title) allIssues.push({
               severity: issue.sev || 'figyelmeztetés',
               title: issue.title, location: issue.loc || '',
-              favors: 'fel1', // HARDCODED: hátrányos fel2-nek = fel1-nek kedvez
+              favors: 'fel1', // HARDCODED: hátrányos alapítónak = befektetőnek kedvez
               description: issue.desc || '',
               fix_text: issue.fix || '',
               impactA: issue.impactA || '',
