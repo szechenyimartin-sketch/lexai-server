@@ -160,10 +160,14 @@ app.post('/api/analyze', async (req, res) => {
           messages: [{ role: 'user', content:
             'Szerz. rész (~' + pFrom + '-' + pTo + '. oldal):\n\n' + chunk + '\n\n' +
             'Gyujtsd össze a 6 legfontosabb problémás klauzulát.\n' +
-            'Minden klauzulánál EGYETLEN kérdés: "Ez a klauzula ' + fel1n + '-nek vagy ' + fel2n + '-nek KEDVEZŐ?"\n' +
-            '- Ha ' + fel1n + '-nek kedvező (mert ' + fel1ad + '): kedvez="fel1"\n' +
-            '- Ha ' + fel2n + '-nek kedvező (mert ' + fel2ad + '): kedvez="fel2"\n' +
-            '- Ha mindkettőnek rossz: kedvez="mindketto"\n\n' +
+            'Minden klauzulánál döntsd el: melyik félnek KEDVEZŐ ez a kikötés?\n' +
+            '\n' +
+            'LOGIKA: ' + fel1n + ' ebben a szerződésben ' + fel1ad + '. ' + fel2n + ' pedig ' + fel2ad + '.\n' +
+            'Ha egy klauzula annak a félnek ad jogot/előnyt aki ' + fel1ad + ' -> kedvez="fel1"\n' +
+            'Ha egy klauzula annak a félnek ad jogot/előnyt aki ' + fel2ad + ' -> kedvez="fel2"\n' +
+            'Ha mindkét félnek hátrányos -> kedvez="mindketto"\n\n' +
+            'ÁLTALÁNOS SZABÁLY: Amelyik klauzula JOGOT, KONTROLLT vagy VÉDELMET ad egy félnek -> annak KEDVEZŐ.\n' +
+            'Amelyik klauzula KÖTELEZETTSÉGET, KOCKÁZATOT vagy HÁTRÁNYT jelent -> a MÁSIKNAK kedvező.\n\n' +
             'JSON (TILOS ```json):\n' +
             '{"klauzulak":[{' +
             '"sev":"kritikus|figyelmeztetés",' +
