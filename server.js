@@ -194,17 +194,22 @@ app.post('/api/analyze', async (req, res) => {
         const r3 = await client.messages.create({
           model: 'claude-sonnet-4-5', max_tokens: 50,
           messages: [{ role: 'user', content:
-            'A szerződés két fele:\n' +
-            'FEL1: ' + fel1n + ' (' + fel1l + ')\n' +
-            'FEL2: ' + fel2n + ' (' + fel2l + ')\n\n' +
-            'A következő klauzulából ez a fél kapja a jogot/előnyt: "' + issue.jogot_kap + '"\n\n' +
-            'Ez a fél FEL1 vagy FEL2? Válaszolj CSAK ennyit: "fel1" vagy "fel2" vagy "mindketto"'
+            'Szerződés két fele:\n' +
+            'FEL1: ' + fel1n + ' – ' + fel1l + '\n' +
+            'FEL2: ' + fel2n + ' – ' + fel2l + '\n\n' +
+            'Klauzula: "' + issue.title + '"\n' +
+            'Leírás: "' + issue.jogot_kap + '"\n\n' +
+            'KÉRDÉS: Ez a klauzula melyik félnek HÁTRÁNYOS (azaz a másik fél profitál belőle)?\n' +
+            'Válaszolj CSAK: "fel1" (ha FEL1-nek hátrányos) vagy "fel2" (ha FEL2-nek hátrányos) vagy "mindketto"'
           }]
         });
         totalIn += r3.usage.input_tokens; totalOut += r3.usage.output_tokens;
         const ans = r3.content[0].text.trim().toLowerCase();
-        if (ans.includes('fel1')) issue.favors = 'fel1';
-        else if (ans.includes('fel2')) issue.favors = 'fel2';
+        // ans = ki a HÁTRÁNYOS fél
+        // favors = ki a KEDVEZMÉNYEZETT fél (ellentéte)
+        if (ans.includes('mindketto')) issue.favors = 'mindketto';
+        else if (ans.includes('fel1')) issue.favors = 'fel2'; // fel1 hátrányos -> fel2 kedvez
+        else if (ans.includes('fel2')) issue.favors = 'fel1'; // fel2 hátrányos -> fel1 kedvez
         else issue.favors = 'mindketto';
       } catch(e) {
         issue.favors = 'mindketto';
