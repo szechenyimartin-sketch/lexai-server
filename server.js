@@ -222,9 +222,9 @@ app.post('/api/analyze', async (req, res) => {
     const issueBasedFel1Protection = Math.round((1 - fel1Score/totalScore) * 100);
     const issueBasedFel2Protection = Math.round((1 - fel2Score/totalScore) * 100);
 
-    // Kombináljuk a score-t és az issue-alapú számítást
-    const finalFel1 = Math.round((avgS1 * 0.4 + issueBasedFel1Protection * 0.6));
-    const finalFel2 = Math.round((avgS2 * 0.4 + issueBasedFel2Protection * 0.6));
+    // Védettség KIZÁRÓLAG az issue-k alapján
+    const finalFel1 = issueBasedFel1Protection;
+    const finalFel2 = issueBasedFel2Protection;
 
     const topIssues = allIssues.slice(0,3).map(x=>x.title).join('; ') || 'nincs';
 
@@ -268,8 +268,8 @@ app.post('/api/analyze', async (req, res) => {
       fel1_score: finalFel1, fel2_score: finalFel2,
       fel1_name: structure.fel1 || '1. Fél',
       fel2_name: structure.fel2 || '2. Fél',
-      per_esely_fel1: sum.p1 || issueBasedFel1Protection,
-      per_esely_fel2: sum.p2 || issueBasedFel2Protection,
+      per_esely_fel1: sum.p1 || finalFel1,
+      per_esely_fel2: sum.p2 || finalFel2,
       merleg: sum.merleg || 'kiegyensulyozott',
       score: Math.round((avgS1+avgS2)/2),
       verdict: sum.verdict || 'Az elemzés elkészült.',
