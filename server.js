@@ -46,40 +46,40 @@ function estimateCost(inp, out) {
 }
 
 const MOCK_RESULT = {
-  fel1_score: 72, fel2_score: 28,
+  fel1_score: 75, fel2_score: 25,
   fel1_name: 'Obudai Venture Capital Zrt.', fel2_name: 'Alapitok es Celtarsasag',
-  per_esely_fel1: 72, per_esely_fel2: 28, merleg: 'fel1_eros', score: 50,
+  per_esely_fel1: 75, per_esely_fel2: 25, merleg: 'fel1_eros', score: 50,
   verdict: 'Strukturalis egyensulyhiany, kisebbsegi jogvedelem hianyos',
-  summary: 'A szerzodes jelentosen a Befekteto javara billen. Az Alapitok kisebbsegi jogai nincsenek megfeleloen vedve.',
-  top_actions: ['ESOP keretszerzodes megalkotasa', 'Drag-Along kuszob 80%-ra emelese', 'Kisebbsegi vetojogok rogzitese'],
-  fel1_javaslatok: ['ESOP pool elkülönitese', 'Preferred Return 2x biztositasa'],
-  fel2_javaslatok: ['Drag-Along minimalár kuszob', 'Tag-Along jog 100%-os reszvetelre'],
+  summary: 'A szerzodes jelentosen a Befekteto javara billen.',
+  top_actions: ['ESOP keretszerzodes', 'Drag-Along 80%-ra', 'Vetojogok rogzitese'],
+  fel1_javaslatok: ['ESOP elkülönitese', 'Preferred Return 2x'],
+  fel2_javaslatok: ['Drag-Along minimalár', 'Tag-Along 100%'],
   issues: [
-    { severity: 'kritikus', title: 'ESOP reszesedes jogi statussa tisztazatlan', location: '4.4.2 (~3. oldal)', favors: 'mindketto',
-      description: 'Az ESOP reszesedések nincsenek külön jogosulthoz rendelve.', fix_text: 'Külön ESOP megallapodas keszitese.',
-      impactA: 'Alapitok szavazati ereje bizonytalan', impactB: 'Befekteto 20%-os pozicioja bizonytalan' },
     { severity: 'kritikus', title: 'Minimalis exit garancia hianya', location: '6.2.5 (~5. oldal)', favors: 'fel2',
-      description: 'Nincs kötelező visszavasarlasi garancia.', fix_text: 'Exit garancia klauzula beepitese.',
-      impactA: 'Befekteto nem tudja kikenyszeriteni exitet', impactB: 'Alapitoknak kedvezo' },
-    { severity: 'kritikus', title: 'Drag-Along kuszob tul alacsony', location: '7.3 (~7. oldal)', favors: 'fel1',
-      description: 'Drag-Along 51%-on aktiválódik, kenyszereladas barmilyen aron.', fix_text: 'Drag-Along kuszob 75-80%-ra emelese.',
-      impactA: 'Befekteto korlátlan hatalmat kap', impactB: 'Alapitok kiszolgáltatottsaga' },
-    { severity: 'figyelmeztetés', title: 'Vesting utemezés nem reszletezett', location: '4.3 (~3. oldal)', favors: 'mindketto',
-      description: 'Az ESOP program vesting ütemezese nincs reszletezve.', fix_text: '1 eves cliff, 4 eves linearis vesting.',
-      impactA: 'Alapitok kontrollalatlanul rendelkezhetnek', impactB: 'Befekteto nem szamonkerheti' },
-    { severity: 'figyelmeztetés', title: 'Informacios jogok korlatozottak', location: '8.1 (~8. oldal)', favors: 'fel2',
-      description: 'Nincs rendkivüli esemeny ertesitesi kötelezettség.', fix_text: 'MAC ertesitesi 5 munkanapon belül.',
-      impactA: 'Befekteto keson ertesül', impactB: 'Alapitokra adminisztrativ teher' }
+      description: 'Nincs kötelező visszavasarlasi garancia a befektetőnek.', fix_text: 'Exit garancia klauzula beepitese.',
+      impactA: 'Befekteto nem tudja kikenyszeriteni exitet', impactB: 'Alapitoknak kedvezo short term' },
+    { severity: 'kritikus', title: 'Drag-Along tul alacsony kuszob', location: '7.3 (~7. oldal)', favors: 'fel1',
+      description: 'Drag-Along 51%-on aktiválódik, kenyszereladas barmilyen aron.', fix_text: 'Drag-Along kuszob 75-80%-ra.',
+      impactA: 'Befekteto korlátlan hatalmat kap exitnel', impactB: 'Alapitok kiszolgáltatottsaga' },
+    { severity: 'kritikus', title: 'ESOP jogi statussa tisztazatlan', location: '4.4.2 (~3. oldal)', favors: 'mindketto',
+      description: 'ESOP reszesedések nincsenek külön jogosulthoz rendelve.', fix_text: 'Külön ESOP megallapodas keszitese.',
+      impactA: 'Befekteto pozicioja bizonytalan', impactB: 'Alapitok szavazati ereje bizonytalan' },
+    { severity: 'figyelmeztetés', title: 'Vesting utemezés hianya', location: '4.3 (~3. oldal)', favors: 'mindketto',
+      description: 'Vesting ütemezese nincs reszletezve.', fix_text: '1 eves cliff, 4 eves linearis vesting.',
+      impactA: 'Befekteto kockazata no', impactB: 'Alapitok motivacioja gyenge' },
+    { severity: 'figyelmeztetés', title: 'Informacios jogok gyengek', location: '8.1 (~8. oldal)', favors: 'fel2',
+      description: 'Nincs rendkivüli esemeny ertesites.', fix_text: 'MAC ertesitesi 5 munkanapon belül.',
+      impactA: 'Befekteto keson ertesül kritikus esemenyekrol', impactB: 'Alapitokra kisebb teher' }
   ],
   positives: [
-    { title: 'Reszletes anti-dilucios vedelem', description: '' },
+    { title: 'Anti-dilucios vedelem megvan', description: '' },
     { title: 'Board megfigyeloi jog biztositott', description: '' }
   ],
   structure: { fel1: 'Obudai Venture Capital Zrt.', fel2: 'Alapitok es Celtarsasag', type: 'Befektetesi szerzodes' },
   _pages: 12, _sections: 3, _mock: true
 };
 
-app.get('/', (req, res) => res.json({ status: 'LexAI Backend', version: '9.0', mock: MOCK_MODE }));
+app.get('/', (req, res) => res.json({ status: 'LexAI Backend', version: '10.0', mock: MOCK_MODE }));
 
 app.post('/api/analyze', async (req, res) => {
   try {
@@ -93,88 +93,75 @@ app.post('/api/analyze', async (req, res) => {
     const toAnalyze = chunks.length <= 3 ? chunks : [chunks[0], chunks[Math.floor(chunks.length/2)], chunks[chunks.length-1]];
     console.log('Elemzes: ' + estPages + ' oldal, ' + toAnalyze.length + ' resz');
 
-    const allIssues = [], allPositives = [], s1arr = [], s2arr = [];
+    let totalIn = 0, totalOut = 0;
+    const allIssues = [], allPositives = [];
     let structure = {};
-    let totalIn = 0;
-    let totalOut = 0;
 
-    // LEPÉS 1: Felek azonositasa az első chunkból
+    // LÉPÉS 1: Felek azonositasa
     try {
       const r0 = await client.messages.create({
         model: 'claude-sonnet-4-5', max_tokens: 400,
         messages: [{ role: 'user', content:
           toAnalyze[0].substring(0, 3000) + '\n\n' +
-          'Azonositsd a két felet és szerepüket.\n' +
+          'Azonositsd a két felet.\n' +
           'JSON (TILOS ```json):\n' +
-          '{"fel1":"fél1 neve","fel2":"fél2 neve","type":"szerz tipus",' +
-          '"fel1_ad":"mit ad fél1 (pl: tokét, bért, munkát)","fel2_ad":"mit ad fél2",' +
-          '"fel1_erős":true/false}'
+          '{"fel1":"fél1 neve","fel2":"fél2 neve","type":"szerz tipus","fel1_leiras":"ki ez a fél 1 mondatban","fel2_leiras":"ki ez a fél 1 mondatban"}'
         }]
       });
       totalIn += r0.usage.input_tokens; totalOut += r0.usage.output_tokens;
-      const info0 = extractJSON(r0.content[0].text);
-      if (info0 && info0.fel1) {
-        structure = {
-          fel1: info0.fel1, fel2: info0.fel2, type: info0.type,
-          fel1_ad: info0.fel1_ad || '', fel2_ad: info0.fel2_ad || '',
-          fel1_eros: info0.fel1_erős !== false
-        };
-      }
-    } catch(e) { console.error('Felek azonositasa hiba:', e.message); }
+      const i0 = extractJSON(r0.content[0].text);
+      if (i0 && i0.fel1) structure = i0;
+    } catch(e) { console.error('Felek hiba:', e.message); }
 
     const fel1n = structure.fel1 || '1. fel';
     const fel2n = structure.fel2 || '2. fel';
-    const fel1ad = structure.fel1_ad || 'tokét/jogot ad';
-    const fel2ad = structure.fel2_ad || 'kötelezettséget vállal';
+    const fel1l = structure.fel1_leiras || 'az egyik fél';
+    const fel2l = structure.fel2_leiras || 'a másik fél';
 
-    // LEPÉS 2: Minden chunkból klauzulák összegyujtése
+    // LÉPÉS 2: Chunkokból problémák gyujtése – CSAK leírás, favors nélkül
+    const rawIssues = [];
     for (let i = 0; i < toAnalyze.length; i++) {
       const chunk = toAnalyze[i];
       const pFrom = Math.round(i * estPages / toAnalyze.length) + 1;
       const pTo = Math.round((i+1) * estPages / toAnalyze.length);
 
-      // 2a: Score és pozitívumok
+      // Pozitivumok
       try {
-        const r1 = await client.messages.create({
-          model: 'claude-sonnet-4-5', max_tokens: 400,
+        const rP = await client.messages.create({
+          model: 'claude-sonnet-4-5', max_tokens: 300,
           messages: [{ role: 'user', content:
-            'Szerz. rész (~' + pFrom + '-' + pTo + '. oldal):\n\n' + chunk.substring(0, 2000) + '\n\n' +
-            'JSON (TILOS ```json):\n' +
-            '{"fel1_score":NUMBER_0_100,"fel2_score":NUMBER_0_100,"pos1":"pozitivum","pos2":"pozitivum"}'
+            chunk.substring(0, 2000) + '\n\n' +
+            'Adj 2 pozitivumot erről a szerz. részről.\n' +
+            'JSON: {"pos1":"pozitivum","pos2":"pozitivum"}'
           }]
         });
-        totalIn += r1.usage.input_tokens; totalOut += r1.usage.output_tokens;
-        const info1 = extractJSON(r1.content[0].text);
-        if (info1) {
-          if (info1.fel1_score) s1arr.push(info1.fel1_score);
-          if (info1.fel2_score) s2arr.push(info1.fel2_score);
-          if (info1.pos1) allPositives.push({ title: info1.pos1, description: '' });
-          if (info1.pos2) allPositives.push({ title: info1.pos2, description: '' });
+        totalIn += rP.usage.input_tokens; totalOut += rP.usage.output_tokens;
+        const pos = extractJSON(rP.content[0].text);
+        if (pos) {
+          if (pos.pos1) allPositives.push({ title: pos.pos1, description: '' });
+          if (pos.pos2) allPositives.push({ title: pos.pos2, description: '' });
         }
-      } catch(e) { console.error('Score hiba:', e.message); }
+      } catch(e) {}
 
-      // 2b: Problémák gyujtése - CSAK a klauzula és leírás, favors nélkül
+      // Problémák – CSAK leírás, ki kinek kedvez nélkül
       try {
         const r2 = await client.messages.create({
-          model: 'claude-sonnet-4-5', max_tokens: 2000,
+          model: 'claude-sonnet-4-5', max_tokens: 2500,
           messages: [{ role: 'user', content:
             'Szerz. rész (~' + pFrom + '-' + pTo + '. oldal):\n\n' + chunk + '\n\n' +
-            'Gyujtsd össze a 6 legfontosabb problémás klauzulát.\n' +
-            'Minden klauzulánál döntsd el: melyik félnek KEDVEZŐ ez a kikötés?\n' +
-            '\n' +
-            'LOGIKA: ' + fel1n + ' ebben a szerződésben ' + fel1ad + '. ' + fel2n + ' pedig ' + fel2ad + '.\n' +
-            'Ha egy klauzula annak a félnek ad jogot/előnyt aki ' + fel1ad + ' -> kedvez="fel1"\n' +
-            'Ha egy klauzula annak a félnek ad jogot/előnyt aki ' + fel2ad + ' -> kedvez="fel2"\n' +
-            'Ha mindkét félnek hátrányos -> kedvez="mindketto"\n\n' +
-            'ÁLTALÁNOS SZABÁLY: Amelyik klauzula JOGOT, KONTROLLT vagy VÉDELMET ad egy félnek -> annak KEDVEZŐ.\n' +
-            'Amelyik klauzula KÖTELEZETTSÉGET, KOCKÁZATOT vagy HÁTRÁNYT jelent -> a MÁSIKNAK kedvező.\n\n' +
+            'Azonositsd a 6 legfontosabb problémás klauzulát.\n' +
+            'Minden klauzulánál:\n' +
+            '1. Mi a klauzula neve és hol van\n' +
+            '2. Pontosan mit mond ez a klauzula (tárgyilagos leírás)\n' +
+            '3. Melyik FÉLNEK AD JOGOT vagy ELŐNYT ez a klauzula\n' +
+            '4. Mi a probléma és hogyan kell javítani\n\n' +
             'JSON (TILOS ```json):\n' +
             '{"klauzulak":[{' +
             '"sev":"kritikus|figyelmeztetés",' +
             '"title":"klauzula neve max 60 kar",' +
             '"loc":"fejezet (~' + pFrom + '.o)",' +
-            '"kedvez":"fel1|fel2|mindketto",' +
-            '"desc":"mi a probléma és miért kedvez annak a félnek max 150 kar",' +
+            '"jogot_kap":"pontosan melyik fél neve kapja a jogot/előnyt ebből",' +
+            '"desc":"mi a probléma max 150 kar",' +
             '"fix":"konkrét javítás max 150 kar",' +
             '"impactA":"hatás ' + fel1n + '-re",' +
             '"impactB":"hatás ' + fel2n + '-re"' +
@@ -185,24 +172,44 @@ app.post('/api/analyze', async (req, res) => {
         const res2 = extractJSON(r2.content[0].text);
         if (res2 && res2.klauzulak) {
           res2.klauzulak.forEach(k => {
-            if (k && k.title) {
-              // kedvez="fel1" azt jelenti fel1-nek KEDVEZŐ = fel2-nek HÁTRÁNYOS
-              // Tehat favors=kedvez (azt a felet jelöli aki NYER ebből)
-              allIssues.push({
-                severity: k.sev || 'figyelmeztetés',
-                title: k.title,
-                location: k.loc || '',
-                favors: k.kedvez || 'mindketto',
-                description: k.desc || '',
-                fix_text: k.fix || '',
-                impactA: k.impactA || '',
-                impactB: k.impactB || ''
-              });
-            }
+            if (k && k.title) rawIssues.push({
+              severity: k.sev || 'figyelmeztetés',
+              title: k.title,
+              location: k.loc || '',
+              jogot_kap: k.jogot_kap || '',
+              description: k.desc || '',
+              fix_text: k.fix || '',
+              impactA: k.impactA || '',
+              impactB: k.impactB || ''
+            });
           });
         }
-        console.log('Chunk ' + (i+1) + ': ' + (res2 && res2.klauzulak ? res2.klauzulak.length : 0) + ' klauzula');
       } catch(e) { console.error('Klauzula hiba:', e.message); }
+    }
+
+    // LÉPÉS 3: Kategorizálás – külön hívás minden issue-ra
+    // Az AI most csak EGY kérdést kap: "a jogot_kap fél fel1 vagy fel2?"
+    for (const issue of rawIssues) {
+      try {
+        const r3 = await client.messages.create({
+          model: 'claude-sonnet-4-5', max_tokens: 50,
+          messages: [{ role: 'user', content:
+            'A szerződés két fele:\n' +
+            'FEL1: ' + fel1n + ' (' + fel1l + ')\n' +
+            'FEL2: ' + fel2n + ' (' + fel2l + ')\n\n' +
+            'A következő klauzulából ez a fél kapja a jogot/előnyt: "' + issue.jogot_kap + '"\n\n' +
+            'Ez a fél FEL1 vagy FEL2? Válaszolj CSAK ennyit: "fel1" vagy "fel2" vagy "mindketto"'
+          }]
+        });
+        totalIn += r3.usage.input_tokens; totalOut += r3.usage.output_tokens;
+        const ans = r3.content[0].text.trim().toLowerCase();
+        if (ans.includes('fel1')) issue.favors = 'fel1';
+        else if (ans.includes('fel2')) issue.favors = 'fel2';
+        else issue.favors = 'mindketto';
+      } catch(e) {
+        issue.favors = 'mindketto';
+      }
+      allIssues.push(issue);
     }
 
     // Deduplikáció
@@ -210,43 +217,40 @@ app.post('/api/analyze', async (req, res) => {
     function isSim(a, b) { return a === b || getKW(a).filter(w => getKW(b).includes(w)).length >= 2; }
     const dedup = allIssues.filter((x, i, arr) => !arr.slice(0, i).some(p => isSim(p.title, x.title)));
 
-    // Scoring:
-    // favors='fel1' = fel1-nek KEDVEZŐ = fel2-nek HÁTRÁNYOS -> fel2 hátrány pontja nő
-    // favors='fel2' = fel2-nek KEDVEZŐ = fel1-nek HÁTRÁNYOS -> fel1 hátrány pontja nő
-    const fel1Hatrany = dedup.filter(x => x.favors === 'fel2'); // fel2 kedvez = fel1 hátrány
-    const fel2Hatrany = dedup.filter(x => x.favors === 'fel1'); // fel1 kedvez = fel2 hátrány
+    // SCORING – pure matematika, AI nem szól bele
+    // favors:'fel1' = fel1-nek KEDVEZ = fel2-nek HÁTRÁNYOS
+    // favors:'fel2' = fel2-nek KEDVEZ = fel1-nek HÁTRÁNYOS
+    const fel1Hatrany = dedup.filter(x => x.favors === 'fel2');
+    const fel2Hatrany = dedup.filter(x => x.favors === 'fel1');
     const mindketto = dedup.filter(x => x.favors === 'mindketto');
 
     function calcW(issues, shared) {
       let s = 0;
       issues.forEach(i => { s += i.severity === 'kritikus' ? 3 : 1; });
       shared.forEach(i => { s += i.severity === 'kritikus' ? 1.5 : 0.5; });
-      return s;
+      return Math.max(s, 0);
     }
 
-    const w1 = calcW(fel1Hatrany, mindketto); // fel1 hátrányai
-    const w2 = calcW(fel2Hatrany, mindketto); // fel2 hátrányai
+    const w1 = calcW(fel1Hatrany, mindketto);
+    const w2 = calcW(fel2Hatrany, mindketto);
     const total = w1 + w2 || 1;
 
-    // Védettség: kevesebb hátrány = magasabb védettség
+    // Védettség = 100 - (saját hátrány / összes hátrány * 100)
     const prot1 = Math.round((1 - w1/total) * 100);
     const prot2 = Math.round((1 - w2/total) * 100);
-
-    const avgS1 = s1arr.length ? Math.round(s1arr.reduce((a,b)=>a+b,0)/s1arr.length) : 50;
-    const avgS2 = s2arr.length ? Math.round(s2arr.reduce((a,b)=>a+b,0)/s2arr.length) : 50;
+    const merleg = prot1 > prot2 + 10 ? 'fel1_eros' : prot2 > prot1 + 10 ? 'fel2_eros' : 'kiegyensulyozott';
 
     // Összefoglaló
     let sum = {};
     try {
-      const topIssues = dedup.slice(0,3).map(x=>x.title).join('; ') || 'nincs';
       const sumR = await client.messages.create({
         model: 'claude-sonnet-4-5', max_tokens: 500,
         messages: [{ role: 'user', content:
-          fel1n + ' hátrányos pontjai (' + fel1Hatrany.length + '): ' + fel1Hatrany.map(x=>x.title).join(', ') + '\n' +
-          fel2n + ' hátrányos pontjai (' + fel2Hatrany.length + '): ' + fel2Hatrany.map(x=>x.title).join(', ') + '\n\n' +
-          'Adj összefoglalót.\n' +
+          fel1n + ' (' + fel1Hatrany.length + ' hátrányos pont): ' + fel1Hatrany.map(x=>x.title).join(', ') + '\n' +
+          fel2n + ' (' + fel2Hatrany.length + ' hátrányos pont): ' + fel2Hatrany.map(x=>x.title).join(', ') + '\n\n' +
+          'Adj összefoglalót erről a szerződésről.\n' +
           'JSON (TILOS ```json):\n' +
-          '{"verdict":"max 10 szó","merleg":"fel1_eros|fel2_eros|kiegyensulyozott",' +
+          '{"verdict":"max 10 szó",' +
           '"summary":"3 mondatos összefoglaló mindkét félről",' +
           '"j1a":"javaslat ' + fel1n + '","j1b":"javaslat",' +
           '"j2a":"javaslat ' + fel2n + '","j2b":"javaslat",' +
@@ -258,14 +262,14 @@ app.post('/api/analyze', async (req, res) => {
     } catch(e) { console.error('Summary hiba:', e.message); }
 
     const cost = estimateCost(totalIn, totalOut);
-    console.log('KESZ: ' + dedup.length + ' issue | ' + cost.cost_huf + ' Ft | prot1=' + prot1 + '% prot2=' + prot2 + '%');
+    console.log('KESZ: ' + dedup.length + ' issue | prot1=' + prot1 + '% prot2=' + prot2 + '% | ' + cost.cost_huf + ' Ft');
 
     res.json({
       fel1_score: prot1, fel2_score: prot2,
       fel1_name: fel1n, fel2_name: fel2n,
       per_esely_fel1: prot1, per_esely_fel2: prot2,
-      merleg: sum.merleg || (prot1 > prot2 ? 'fel1_eros' : 'fel2_eros'),
-      score: Math.round((avgS1+avgS2)/2),
+      merleg: merleg,
+      score: 50,
       verdict: sum.verdict || 'Az elemzés elkészült.',
       summary: sum.summary || 'Az elemzés elkészült.',
       top_actions: [sum.a1, sum.a2, sum.a3].filter(Boolean),
