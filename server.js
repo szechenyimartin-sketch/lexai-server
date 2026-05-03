@@ -144,57 +144,77 @@ app.post('/api/analyze', async (req, res) => {
       const fel1n = structure.fel1 || '1. fél';
       const fel2n = structure.fel2 || '2. fél';
 
-      // LÉPÉS 2: Átfogó elemzés – egy hívásban minden issue, az AI dönti el melyik félnek hátrányos
+      // LÉPÉS 2a: Mi hátrányos FEL1-nek? (favors:'fel2' hardcoded)
       try {
-        const rIssues = await client.messages.create({
+        const rA = await client.messages.create({
           model: 'claude-sonnet-4-5',
-          max_tokens: 3000,
+          max_tokens: 1500,
           messages: [{ role: 'user', content:
             'Szerződésrész (~' + pFrom + '-' + pTo + '. oldal):\n\n' + chunk + '\n\n' +
-            'FELEK:\n' +
-            '- ' + fel1n + ': a BEFEKTETŐ/ERŐSEBB FÉL (tőkét ad, jogokat kap)\n' +
-            '- ' + fel2n + ': az ALAPÍTÓ/GYENGÉBB FÉL (tőkét kap, kötelezettségeket vállal)\n\n' +
-            'SZABÁLYOK:\n' +
-            '- favors:"fel1" = ' + fel1n + '-nek KEDVEZ (azaz ' + fel2n + '-nek HÁTRÁNYOS)\n' +
-            '- favors:"fel2" = ' + fel2n + '-nek KEDVEZ (azaz ' + fel1n + '-nek HÁTRÁNYOS)\n' +
-            '- favors:"mindketto" = mindkét félnek hátrányos\n\n' +
-            'TIPIKUSAN ' + fel1n + '-nek KEDVEZŐ (favors:fel1): Drag-Along, lock-up, kényszereladás, hígulás elleni védelem csak befektetőnek, korlátozott átruházás\n' +
-            'TIPIKUSAN ' + fel2n + '-nek KEDVEZŐ (favors:fel2): alacsony IRR, gyenge exit garancia, korlátozott információs jog, befektető felelőssége korlátlan\n\n' +
-            'Azonosítsd a TOP 8 legsúlyosabb jogi problémát REÁLISAN – ne erőltesd mindkét félnek ugyanannyit!\n' +
+            'KI A KÉT FÉL:\n' +
+            '- ' + fel1n + ' = BEFEKTETŐ (pénzt ad, jogokat vár)\n' +
+            '- ' + fel2n + ' = ALAPÍTÓ/CÉLTÁRSASÁG (pénzt kap, kötelezettséget vállal)\n\n' +
+            'FELADAT: Keresd meg azt a TOP 4 klauzulát ami ' + fel1n + ' BEFEKTETŐNEK HÁTRÁNYOS.\n' +
+            'Tipikusan hátrányos a BEFEKTETŐNEK: gyenge exit garancia, alacsony IRR, korlátozott információs jog, befektető felelőssége korlátlan, gyenge szavazati jog.\n' +
+            'NE sorold fel ami a befektetőnek JÓ (pl. Drag-Along, lock-up, hígulás elleni védelem – ezek a befektető jogai!).\n' +
             'JSON (TILOS ```json):\n' +
-            '{"issues":[{' +
-            '"sev":"kritikus|figyelmeztetés",' +
-            '"title":"probléma neve max 60 kar",' +
-            '"loc":"fejezet (~' + pFrom + '.o)",' +
-            '"favors":"fel1|fel2|mindketto",' +
-            '"desc":"miért probléma és kinek hátrányos, max 200 kar",' +
-            '"fix":"konkrét javítás max 150 kar",' +
-            '"impactA":"hatás ' + fel1n + '-re",' +
-            '"impactB":"hatás ' + fel2n + '-re"' +
-            '}]}'
+            '{"issues":[{"sev":"kritikus|figyelmeztetés","title":"max 60 kar","loc":"fejezet (~' + pFrom + '.o)","desc":"miért hátrányos ' + fel1n + '-nek max 150 kar","fix":"konkrét javítás max 150 kar","impactA":"hatás ' + fel1n + '-re","impactB":"hatás ' + fel2n + '-re"}]}\n' +
+            'Ha valóban nincs ilyen: {"issues":[]}'
           }]
         });
-        totalInputTokens += rIssues.usage.input_tokens;
-        totalOutputTokens += rIssues.usage.output_tokens;
-        const resIssues = extractJSON(rIssues.content[0].text);
-        if (resIssues && resIssues.issues) {
-          resIssues.issues.forEach(issue => {
-            if (issue && issue.title) {
-              allIssues.push({
-                severity: issue.sev || 'figyelmeztetés',
-                title: issue.title,
-                location: issue.loc || '',
-                favors: issue.favors || 'mindketto',
-                description: issue.desc || '',
-                fix_text: issue.fix || '',
-                impactA: issue.impactA || '',
-                impactB: issue.impactB || ''
-              });
-            }
+        totalInputTokens += rA.usage.input_tokens;
+        totalOutputTokens += rA.usage.output_tokens;
+        const resA = extractJSON(rA.content[0].text);
+        if (resA && resA.issues) {
+          resA.issues.forEach(issue => {
+            if (issue && issue.title) allIssues.push({
+              severity: issue.sev || 'figyelmeztetés',
+              title: issue.title, location: issue.loc || '',
+              favors: 'fel2', // HARDCODED: hátrányos fel1-nek = fel2-nek kedvez
+              description: issue.desc || '',
+              fix_text: issue.fix || '',
+              impactA: issue.impactA || '',
+              impactB: issue.impactB || ''
+            });
           });
         }
-        console.log('Chunk ' + (i+1) + ' issues:', resIssues ? resIssues.issues.length : 0);
-      } catch(e) { console.error('Issue elemzés hiba:', e.message); }
+      } catch(e) { console.error('Fel1 hátrány hiba:', e.message); }
+
+      // LÉPÉS 2b: Mi hátrányos FEL2-nek? (favors:'fel1' hardcoded)
+      try {
+        const rB = await client.messages.create({
+          model: 'claude-sonnet-4-5',
+          max_tokens: 1500,
+          messages: [{ role: 'user', content:
+            'Szerződésrész (~' + pFrom + '-' + pTo + '. oldal):\n\n' + chunk + '\n\n' +
+            'KI A KÉT FÉL:\n' +
+            '- ' + fel1n + ' = BEFEKTETŐ (pénzt ad, jogokat vár)\n' +
+            '- ' + fel2n + ' = ALAPÍTÓ/CÉLTÁRSASÁG (pénzt kap, kötelezettséget vállal)\n\n' +
+            'FELADAT: Keresd meg azt a TOP 4 klauzulát ami ' + fel2n + ' ALAPÍTÓNAK/CÉLTÁRSASÁGNAK HÁTRÁNYOS.\n' +
+            'Tipikusan hátrányos az ALAPÍTÓNAK: Drag-Along kényszereladás, lock-up korlátok, hígulás, korlátozott átruházás, kényszerkivásárlás alacsony áron, ESOP bizonytalanság.\n' +
+            'NE sorold fel ami az alapítónak JÓ (pl. tőkebevonás, alacsony IRR kötelezettség az alapítónak – ez az alapítónak kedvező!).\n' +
+            'JSON (TILOS ```json):\n' +
+            '{"issues":[{"sev":"kritikus|figyelmeztetés","title":"max 60 kar","loc":"fejezet (~' + pFrom + '.o)","desc":"miért hátrányos ' + fel2n + '-nek max 150 kar","fix":"konkrét javítás max 150 kar","impactA":"hatás ' + fel1n + '-re","impactB":"hatás ' + fel2n + '-re"}]}\n' +
+            'Ha valóban nincs ilyen: {"issues":[]}'
+          }]
+        });
+        totalInputTokens += rB.usage.input_tokens;
+        totalOutputTokens += rB.usage.output_tokens;
+        const resB = extractJSON(rB.content[0].text);
+        if (resB && resB.issues) {
+          resB.issues.forEach(issue => {
+            if (issue && issue.title) allIssues.push({
+              severity: issue.sev || 'figyelmeztetés',
+              title: issue.title, location: issue.loc || '',
+              favors: 'fel1', // HARDCODED: hátrányos fel2-nek = fel1-nek kedvez
+              description: issue.desc || '',
+              fix_text: issue.fix || '',
+              impactA: issue.impactA || '',
+              impactB: issue.impactB || ''
+            });
+          });
+        }
+      } catch(e) { console.error('Fel2 hátrány hiba:', e.message); }
 
     } // for loop vége
 
