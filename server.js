@@ -293,10 +293,12 @@ app.post('/api/analyze', async (req, res) => {
       model: 'claude-sonnet-4-5',
       max_tokens: 500,
       messages: [{ role: 'user', content:
-        '1.fél:' + (structure.fel1||'Ügyfél') + ' ' + avgS1 + '/100. 2.fél:' + (structure.fel2||'Szolgáltató') + ' ' + avgS2 + '/100.\n' +
-        'Problémák:' + topIssues + '\n' +
+        '1.fél:' + (structure.fel1||'Ügyfél') + ' védettségi szint:' + avgS1 + '/100. 2.fél:' + (structure.fel2||'Szolgáltató') + ' védettségi szint:' + avgS2 + '/100.\n' +
+        'Főbb problémák:' + topIssues + '\n' +
+        'Feladat: Becsüld meg a PER esetén várható nyerési esélyeket (0-100% között, összegük 100%), és adj összefoglalót.\n' +
+        'FONTOS: p1+p2=100! Ha 1.fél erősebb pozícióban van, p1>50. Ha egyenlő, p1=50,p2=50.\n' +
         'Csak ezt a JSON-t írd (TILOS ```json, max 100 kar/érték):\n' +
-        '{"verdict":"összítélet","p1":NUMBER,"p2":NUMBER,"merleg":"fel1_eros|fel2_eros|kiegyensulyozott","summary":"3 mondatos összefoglaló","j1a":"javaslat fél1","j1b":"javaslat fél1","j2a":"javaslat fél2","j2b":"javaslat fél2","a1":"teendő","a2":"teendő","a3":"teendő"}'
+        '{"verdict":"összítélet max 10 szó","p1":SZAM_0_100,"p2":SZAM_0_100,"merleg":"fel1_eros|fel2_eros|kiegyensulyozott","summary":"3 mondatos összefoglaló","j1a":"javaslat fél1","j1b":"javaslat fél1","j2a":"javaslat fél2","j2b":"javaslat fél2","a1":"teendő","a2":"teendő","a3":"teendő"}'
       }]
     });
     totalInputTokens += sumR.usage.input_tokens;
