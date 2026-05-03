@@ -151,9 +151,10 @@ app.post('/api/analyze', async (req, res) => {
           max_tokens: 1500,
           messages: [{ role: 'user', content:
             problemPrompt +
-            'Keresd meg a TOP 4 problémát ami ' + fel1n + ' szempontjából HÁTRÁNYOS.\n' +
+            'Keresd meg a TOP 4 problémát ami ' + fel1n + ' szempontjából HÁTRÁNYOS (azaz ' + fel2n + ' javára szól).\n' +
+            'FONTOS: favors mezőbe mindig "fel2" kerüljön (mert ' + fel2n + ' javára szól).\n' +
             'JSON (TILOS ```json):\n' +
-            '{"issues":[{"sev":"kritikus|figyelmeztetés","title":"max 60 kar","loc":"fejezet (~' + pFrom + '.o)","desc":"miért hátrányos max 150 kar","fix":"konkrét javítás max 150 kar","impactA":"hatás ' + fel1n + '-re","impactB":"hatás ' + fel2n + '-re"}]}\n' +
+            '{"issues":[{"sev":"kritikus|figyelmeztetés","title":"max 60 kar","loc":"fejezet (~' + pFrom + '.o)","favors":"fel2","desc":"miért hátrányos ' + fel1n + '-nek max 150 kar","fix":"konkrét javítás max 150 kar","impactA":"hatás ' + fel1n + '-re","impactB":"hatás ' + fel2n + '-re"}]}\n' +
             'Ha nincs: {"issues":[]}'
           }]
         });
@@ -179,9 +180,10 @@ app.post('/api/analyze', async (req, res) => {
           max_tokens: 1500,
           messages: [{ role: 'user', content:
             problemPrompt +
-            'Keresd meg a TOP 4 problémát ami ' + fel2n + ' szempontjából HÁTRÁNYOS.\n' +
+            'Keresd meg a TOP 4 problémát ami ' + fel2n + ' szempontjából HÁTRÁNYOS (azaz ' + fel1n + ' javára szól).\n' +
+            'FONTOS: favors mezőbe mindig "fel1" kerüljön (mert ' + fel1n + ' javára szól).\n' +
             'JSON (TILOS ```json):\n' +
-            '{"issues":[{"sev":"kritikus|figyelmeztetés","title":"max 60 kar","loc":"fejezet (~' + pFrom + '.o)","desc":"miért hátrányos max 150 kar","fix":"konkrét javítás max 150 kar","impactA":"hatás ' + fel1n + '-re","impactB":"hatás ' + fel2n + '-re"}]}\n' +
+            '{"issues":[{"sev":"kritikus|figyelmeztetés","title":"max 60 kar","loc":"fejezet (~' + pFrom + '.o)","favors":"fel1","desc":"miért hátrányos ' + fel2n + '-nek max 150 kar","fix":"konkrét javítás max 150 kar","impactA":"hatás ' + fel1n + '-re","impactB":"hatás ' + fel2n + '-re"}]}\n' +
             'Ha nincs: {"issues":[]}'
           }]
         });
