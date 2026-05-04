@@ -14,16 +14,12 @@ const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || '';
 const OPENAI_KEY = process.env.OPENAI_API_KEY || '';
 
-if (MOCK_MODE) {
-  console.log('⚠️  MOCK MODE AKTÍV');
-} else {
-  console.log('✅ ÉLES MÓD');
-}
+if (MOCK_MODE) { console.log('⚠️  MOCK MODE AKTÍV'); }
+else { console.log('✅ ÉLES MÓD v2 – 4 lépéses elemzés'); }
 
 // ============================================================
-// PTK RAG – OpenAI embedding + Supabase keresés
+// PTK RAG
 // ============================================================
-
 function httpsPost(hostname, path, headers, body) {
   return new Promise((resolve, reject) => {
     const data = JSON.stringify(body);
@@ -41,18 +37,15 @@ function httpsPost(hostname, path, headers, body) {
 async function getEmbedding(text) {
   if (!OPENAI_KEY) return null;
   try {
-    const resp = await httpsPost('api.openai.com', '/v1/embeddings', {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer ' + OPENAI_KEY
-    }, { model: 'text-embedding-3-small', input: text.slice(0, 2000) });
+    const resp = await httpsPost('api.openai.com', '/v1/embeddings',
+      { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + OPENAI_KEY },
+      { model: 'text-embedding-3-small', input: text.slice(0, 2000) }
+    );
     return resp.data[0].embedding;
-  } catch(e) {
-    console.error('Embedding hiba:', e.message);
-    return null;
-  }
+  } catch(e) { console.error('Embedding hiba:', e.message); return null; }
 }
 
-async function searchPtk(contractText, matchCount = 6) {
+async function searchPtk(contractText, matchCount = 8) {
   if (!SUPABASE_URL || !SUPABASE_KEY || !OPENAI_KEY) return [];
   const embedding = await getEmbedding(contractText);
   if (!embedding) return [];
@@ -60,103 +53,19 @@ async function searchPtk(contractText, matchCount = 6) {
     const resp = await httpsPost(
       SUPABASE_URL.replace('https://', ''),
       '/rest/v1/rpc/search_ptk',
-      {
-        'Content-Type': 'application/json',
-        'apikey': SUPABASE_KEY,
-        'Authorization': 'Bearer ' + SUPABASE_KEY
-      },
+      { 'Content-Type': 'application/json', 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY },
       { query_embedding: embedding, match_count: matchCount, similarity_threshold: 0.65 }
     );
     return Array.isArray(resp) ? resp : [];
-  } catch(e) {
-    console.error('Ptk keresés hiba:', e.message);
-    return [];
-  }
+  } catch(e) { console.error('Ptk keresés hiba:', e.message); return []; }
 }
 
 function formatPtkContext(paragraphs) {
   if (!paragraphs.length) return '';
-  return '\n\n---\nRELEVÁNS PTK. §-OK:\n' + paragraphs.map(p =>
-    p.section_id + (p.title ? ' [' + p.title + ']' : '') + ' (' + (p.book || '') + '):\n' + p.content.slice(0, 300)
+  return '\n\nRELEVÁNS PTK. §-OK:\n' + paragraphs.map(p =>
+    p.section_id + (p.title ? ' [' + p.title + ']' : '') + ':\n' + p.content.slice(0, 250)
   ).join('\n\n');
 }
-
-// ============================================================
-// PTK FELTÖLTŐ ENDPOINT – /api/upload-ptk
-// Ezt egyszer kell meghívni a Ptk. adatbázisba töltéséhez!
-// ============================================================
-
-const PTK_CHUNKS = []; // Ide kerül a parsed Ptk. (lásd alább)
-
-app.post('/api/upload-ptk', async (req, res) => {
-  const { secret } = req.body;
-  if (secret !== 'lexai-ptk-2024') return res.status(403).json({ error: 'Tiltott' });
-  if (!OPENAI_KEY || !SUPABASE_URL || !SUPABASE_KEY) return res.status(500).json({ error: 'Hiányzó env változók' });
-
-  res.json({ message: 'Feltöltés elindult a háttérben, nézd a logokat!' });
-
-  // Háttérben fut
-  (async () => {
-    console.log('PTK feltöltés indul... ' + PTK_CHUNKS.length + ' chunk');
-    let ok = 0, err = 0;
-    const BATCH = 10;
-    for (let i = 0; i < PTK_CHUNKS.length; i += BATCH) {
-      const batch = PTK_CHUNKS.slice(i, i + BATCH);
-      for (const chunk of batch) {
-        try {
-          const emb = await getEmbedding(chunk.section_id + ' ' + chunk.title + '\n' + chunk.content);
-          if (!emb) { err++; continue; }
-          await httpsPost(
-            SUPABASE_URL.replace('https://', ''),
-            '/rest/v1/ptk_paragraphs',
-            { 'Content-Type': 'application/json', 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Prefer': 'return=minimal' },
-            { section_id: chunk.section_id, title: chunk.title, book: chunk.book, chapter: chunk.chapter, content: chunk.content, embedding: emb }
-          );
-          ok++;
-          if (ok % 50 === 0) console.log('Feltöltve: ' + ok + '/' + PTK_CHUNKS.length);
-        } catch(e) { console.error('Chunk hiba:', e.message); err++; }
-      }
-      await new Promise(r => setTimeout(r, 200));
-    }
-    console.log('PTK feltöltés kész! OK:' + ok + ' Hiba:' + err);
-  })();
-});
-
-// ============================================================
-// MOCK ADATOK
-// ============================================================
-const MOCK_ANALYZE_RESULT = {
-  fel1_score: 72, fel2_score: 28,
-  fel1_name: 'Óbuda Uni Venture Capital Zrt.', fel2_name: 'Alapítók és Céltársaság',
-  per_esely_fel1: 72, per_esely_fel2: 28, merleg: 'fel1_eros', score: 50,
-  verdict: 'Strukturális egyensúlyhiány, kisebbségi jogvédelem hiányos',
-  summary: 'A szerződés jelentősen a Befektető javára billen. Az Alapítók kisebbségi jogai nincsenek megfelelően védve.',
-  top_actions: ['ESOP keretszerződés megalkotása', 'Drag-Along küszöb minimum 80%-ra emelése', 'Kisebbségi vétójogok explicit rögzítése'],
-  fel1_javaslatok: ['ESOP pool explicit elkülönítése', 'Preferred Return minimum 2x biztosítása'],
-  fel2_javaslatok: ['Drag-Along minimálár küszöb beépítése', 'Tag-Along jog 100%-os részvételre'],
-  issues: [{
-    severity: 'kritikus', title: 'ESOP részesedés jogi státusza tisztázatlan',
-    location: '4.4.2 Tulajdonosi szerkezet (~3. oldal)', favors: 'mindketto',
-    description: 'Az ESOP részesedések nincsenek külön jogosulthoz rendelve.',
-    fix_text: 'Külön ESOP megállapodás készítése szükséges.',
-    impactA: 'Szavazati erőviszonyok megváltozása.', impactB: 'Befektetői pozíció gyengülése.',
-    ptk_refs: [{ section: '3:1.§', title: 'A jogi személy', book: 'Harmadik Könyv – Jogi személyek' }]
-  }],
-  positives: [{ title: 'Részletes anti-dilúciós védelem', description: '' }],
-  structure: { fel1: 'Óbuda Uni Venture Capital Zrt.', fel2: 'Alapítók', type: 'Befektetési szerződés' },
-  _pages: 12, _sections: 3, _mock: true
-};
-
-const MOCK_GENERATE_HINTS = {
-  hints: [
-    { text: 'Fizetési határidő és késedelmi kamat mértéke (Ptk. 6:155§)', importance: 'must' },
-    { text: 'Teljesítési hely és átvétel módja', importance: 'must' },
-    { text: 'Szavatossági és jótállási feltételek', importance: 'must' },
-    { text: 'Felmondási feltételek és felmondási idő', importance: 'rec' },
-    { text: 'Vis maior klauzula és értelmezése', importance: 'rec' },
-    { text: 'Vitarendezés módja', importance: 'opt' }
-  ]
-};
 
 // ============================================================
 // HELPER FUNKCIÓK
@@ -193,21 +102,57 @@ function extractJSON(raw) {
 }
 
 function estimateCost(inputTokens, outputTokens) {
-  const inputCost = (inputTokens / 1000000) * 3.0;
-  const outputCost = (outputTokens / 1000000) * 15.0;
-  const totalUsd = inputCost + outputCost;
+  const totalUsd = (inputTokens / 1000000) * 3.0 + (outputTokens / 1000000) * 15.0;
   return { input_tokens: inputTokens, output_tokens: outputTokens, cost_usd: Math.round(totalUsd * 10000) / 10000, cost_huf: Math.round(totalUsd * 370) };
 }
+
+// ============================================================
+// MOCK ADATOK
+// ============================================================
+const MOCK_ANALYZE_RESULT = {
+  fel1_score: 38, fel2_score: 63,
+  fel1_name: 'Óbuda Uni Venture Capital Zrt.', fel2_name: 'Alapítók és Céltársaság',
+  per_esely_fel1: 38, per_esely_fel2: 62, merleg: 'fel2_eros', score: 50,
+  verdict: 'Az Alapítók erősebb pozícióban vannak',
+  summary: 'A szerződés az Alapítók javára billen. A Befektető exit garanciái gyengék.',
+  top_actions: ['Exit garancia klauzula beépítése', 'Drag-Along küszöb emelése 80%-ra', 'ESOP keretszerződés elkészítése'],
+  fel1_javaslatok: ['Preferred Return minimum 2x biztosítása', 'Board megfigyelői jog erősítése'],
+  fel2_javaslatok: ['Tag-Along jog 100%-os részvételre', 'Vesting ütemezés rögzítése'],
+  issues: [{
+    severity: 'kritikus', title: 'Exit garancia hiánya',
+    location: '6.2 Exit rendelkezések', favors: 'fel2',
+    description: 'Az 5 éves exit csak szándék, nem kötelezettség.',
+    fix_text: 'Kötelező visszavásárlási jog beépítése 5 év után.',
+    impactA: 'A Befektető bennreked a befektetésével.',
+    impactB: 'Az Alapítóknak nem kell exitálni.',
+    ptk_ref: '6:150.§ – Szerződés megszűnése felmondással'
+  }],
+  positives: [{ title: 'Anti-dilúciós védelem biztosított', description: '' }],
+  structure: { fel1: 'Befektető', fel2: 'Alapítók', type: 'Befektetési szerződés' },
+  ptk_references: [{ section: '6:150.§', title: 'Felmondás', book: 'Hatodik Könyv' }],
+  _pages: 12, _sections: 3, _mock: true
+};
+
+const MOCK_GENERATE_HINTS = {
+  hints: [
+    { text: 'Fizetési határidő és késedelmi kamat (Ptk. 6:155§)', importance: 'must' },
+    { text: 'Teljesítési hely és átvétel módja', importance: 'must' },
+    { text: 'Szavatossági feltételek', importance: 'must' },
+    { text: 'Felmondási feltételek', importance: 'rec' },
+    { text: 'Vis maior klauzula', importance: 'rec' },
+    { text: 'Vitarendezés módja', importance: 'opt' }
+  ]
+};
 
 // ============================================================
 // ROUTES
 // ============================================================
 app.get('/', (req, res) => {
-  res.json({ status: 'LexAI Backend running', version: '7.0-RAG', mock_mode: MOCK_MODE });
+  res.json({ status: 'LexAI Backend', version: '11.0-4step', mock_mode: MOCK_MODE });
 });
 
 // ============================================================
-// ELEMZÉS – RAG alapú Ptk. hivatkozásokkal
+// ELEMZÉS – 4 LÉPÉSES MEGKÖZELÍTÉS
 // ============================================================
 app.post('/api/analyze', async (req, res) => {
   try {
@@ -215,73 +160,79 @@ app.post('/api/analyze', async (req, res) => {
     if (!text || text.length < 30) return res.status(400).json({ error: 'Nincs szöveg' });
 
     if (MOCK_MODE) {
-      console.log('MOCK: analyze kérés');
       await new Promise(r => setTimeout(r, 1500));
       return res.json(MOCK_ANALYZE_RESULT);
     }
 
     if (!process.env.ANTHROPIC_API_KEY) return res.status(500).json({ error: 'API kulcs hiányzik' });
 
-    // PTK RAG keresés
-    console.log('Ptk. RAG keresés indul...');
+    let totalInputTokens = 0, totalOutputTokens = 0;
+    const textSample = text.slice(0, 8000);
+
+    // ── LÉPÉS 1: Felek és szerződés azonosítása ──────────────
+    console.log('1. lépés: Felek azonosítása...');
+    const step1 = await client.messages.create({
+      model: 'claude-sonnet-4-5',
+      max_tokens: 800,
+      messages: [{ role: 'user', content:
+        'Olvasd el ezt a szerződést és azonosítsd a feleket PONTOSAN.\n\n' +
+        'SZERZŐDÉS:\n' + textSample + '\n\n' +
+        'FELADAT: Azonosítsd:\n' +
+        '1. Ki az 1. fél? (neve, szerepe a szerződésben: pl. Megrendelő, Befektető, Eladó, Munkáltató)\n' +
+        '2. Ki a 2. fél? (neve, szerepe: pl. Vállalkozó, Alapító, Vevő, Munkavállaló)\n' +
+        '3. Mi a szerződés típusa?\n' +
+        '4. Mi a szerződés fő tárgya?\n' +
+        '5. Melyik fél van ERŐSEBB tárgyalási pozícióban általában ilyen szerződésben?\n\n' +
+        'Csak ezt a JSON-t írd (TILOS ```json):\n' +
+        '{"fel1_nev":"pontos név","fel1_szerep":"pl. Befektető/Megrendelő/Eladó","fel2_nev":"pontos név","fel2_szerep":"pl. Alapító/Vállalkozó/Vevő","szerzodes_tipus":"pl. Befektetési szerződés","szerzodes_targy":"rövid leírás","erosebb_fel":"fel1|fel2","indok":"miért"}'
+      }]
+    });
+    totalInputTokens += step1.usage.input_tokens;
+    totalOutputTokens += step1.usage.output_tokens;
+    const felek = extractJSON(step1.content[0].text) || {};
+    console.log('Felek:', felek.fel1_nev, '/', felek.fel2_nev);
+
+    // ── LÉPÉS 2: PTK keresés ──────────────────────────────────
+    console.log('2. lépés: Ptk. RAG keresés...');
     const ptkParagraphs = await searchPtk(text);
     const ptkContext = formatPtkContext(ptkParagraphs);
-    console.log('Ptk. találatok: ' + ptkParagraphs.length + ' §');
+    console.log('Ptk. találatok:', ptkParagraphs.length);
 
-    const estPages = Math.max(1, Math.round(text.length / 1800));
-    const chunks = splitIntoChunks(text, 12000);
+    // ── LÉPÉS 3: Klauzula elemzés – ki kinek kedvez ──────────
+    console.log('3. lépés: Klauzula elemzés...');
+    const chunks = splitIntoChunks(text, 10000);
     const toAnalyze = chunks.length <= 3 ? chunks : [chunks[0], chunks[Math.floor(chunks.length/2)], chunks[chunks.length-1]];
-
-    console.log('Elemzés: ' + estPages + ' oldal, ' + toAnalyze.length + ' rész');
+    const estPages = Math.max(1, Math.round(text.length / 1800));
 
     const allIssues = [];
     const allPositives = [];
     const s1arr = [], s2arr = [];
-    let structure = {};
-    let totalInputTokens = 0, totalOutputTokens = 0;
 
     for (let i = 0; i < toAnalyze.length; i++) {
       const chunk = toAnalyze[i];
       const pFrom = Math.round(i * estPages / toAnalyze.length) + 1;
       const pTo = Math.round((i+1) * estPages / toAnalyze.length);
 
-      // Alap info
-      try {
-        const r1 = await client.messages.create({
-          model: 'claude-sonnet-4-5',
-          max_tokens: 500,
-          messages: [{ role: 'user', content:
-            'Szerződésrész (~' + pFrom + '-' + pTo + '. oldal). Adj alap infót.\n\n' +
-            chunk.substring(0, 2000) + '\n\n' +
-            'Csak ezt a JSON-t írd (TILOS ```json):\n' +
-            '{"fel1_score":NUMBER,"fel2_score":NUMBER,"fel1":"fél1 neve max 30 kar","fel2":"fél2 neve max 30 kar","type":"szerz típus max 30 kar","pos1":"pozitívum max 60 kar","pos2":"pozitívum max 60 kar"}'
-          }]
-        });
-        totalInputTokens += r1.usage.input_tokens;
-        totalOutputTokens += r1.usage.output_tokens;
-        const info = extractJSON(r1.content[0].text);
-        if (info) {
-          if (info.fel1_score) s1arr.push(info.fel1_score);
-          if (info.fel2_score) s2arr.push(info.fel2_score);
-          if (info.fel1 && !structure.fel1) structure = { fel1: info.fel1, fel2: info.fel2, type: info.type };
-          if (info.pos1) allPositives.push({ title: info.pos1, description: '' });
-          if (info.pos2) allPositives.push({ title: info.pos2, description: '' });
-        }
-      } catch(e) { console.error('Info hiba:', e.message); }
-
-      // Problémák – most PTK kontextussal!
-      const problemPrompt = 'Szerződésrész (~' + pFrom + '-' + pTo + '. oldal):\n\n' + chunk + ptkContext + '\n\n';
-
-      for (let n = 1; n <= 2; n++) {
+      // Problémák keresése – explicit fél-meghatározással
+      for (let n = 1; n <= 3; n++) {
         try {
           const rN = await client.messages.create({
             model: 'claude-sonnet-4-5',
-            max_tokens: 700,
+            max_tokens: 800,
             messages: [{ role: 'user', content:
-              problemPrompt +
-              'Add meg a ' + n + '. legsúlyosabb jogi problémát. Ha van releváns Ptk. §, hivatkozz rá!\n' +
-              'Csak ezt a JSON-t írd (TILOS ```json, max 120 kar/érték):\n' +
-              '{"van":true,"sev":"kritikus|figyelmeztetés|info","title":"probléma neve","loc":"fejezet/pont (~' + pFrom + '.o)","favors":"fel1|fel2|mindketto","desc":"miért probléma","fix":"konkrét javítás","impactA":"hatás 1. félre","impactB":"hatás 2. félre","ptk":"pl. 6:62.§ – adásvétel vagy üres string"}\n' +
+              'FONTOS KONTEXTUS:\n' +
+              '- 1. FÉL: ' + (felek.fel1_nev || '1. Fél') + ' (szerepe: ' + (felek.fel1_szerep || 'ismeretlen') + ')\n' +
+              '- 2. FÉL: ' + (felek.fel2_nev || '2. Fél') + ' (szerepe: ' + (felek.fel2_szerep || 'ismeretlen') + ')\n' +
+              '- SZERZŐDÉS TÍPUSA: ' + (felek.szerzodes_tipus || 'ismeretlen') + '\n\n' +
+              'SZERZŐDÉSRÉSZ (~' + pFrom + '-' + pTo + '. oldal):\n' + chunk + '\n' +
+              ptkContext + '\n\n' +
+              'FELADAT: Add meg a ' + n + '. legsúlyosabb problémát ebben a részben.\n' +
+              'KRITIKUS: A "favors" mezőbe PONTOSAN add meg melyik félnek KEDVEZ ez a klauzula.\n' +
+              'Ha a klauzula az 1. félnek (' + (felek.fel1_nev || '1. Fél') + ') kedvez → favors="fel1"\n' +
+              'Ha a klauzula a 2. félnek (' + (felek.fel2_nev || '2. Fél') + ') kedvez → favors="fel2"\n' +
+              'Ha mindkettőnek → favors="mindketto"\n\n' +
+              'Csak ezt a JSON-t írd (TILOS ```json):\n' +
+              '{"van":true,"sev":"kritikus|figyelmeztetés|info","title":"probléma neve","loc":"fejezet (~' + pFrom + '.o)","favors":"fel1|fel2|mindketto","desc":"miért probléma max 150 kar","fix":"konkrét javítás max 150 kar","impactA":"hatás ' + (felek.fel1_nev || '1. félre') + ' max 100 kar","impactB":"hatás ' + (felek.fel2_nev || '2. félre') + ' max 100 kar","ptk":"pl. 6:142.§ – Kártérítés vagy üres"}\n' +
               'Ha nincs ' + n + '. probléma: {"van":false}'
             }]
           });
@@ -301,39 +252,88 @@ app.post('/api/analyze', async (req, res) => {
               ptk_ref: issue.ptk || ''
             });
           }
-        } catch(e) { console.error('Issue' + n + ' hiba:', e.message); }
+        } catch(e) { console.error('Issue hiba:', e.message); }
       }
+
+      // Védettségi szint külön kérés – explicit fél-meghatározással
+      try {
+        const rScore = await client.messages.create({
+          model: 'claude-sonnet-4-5',
+          max_tokens: 400,
+          messages: [{ role: 'user', content:
+            '1. FÉL: ' + (felek.fel1_nev || '1. Fél') + ' (szerepe: ' + (felek.fel1_szerep || '') + ')\n' +
+            '2. FÉL: ' + (felek.fel2_nev || '2. Fél') + ' (szerepe: ' + (felek.fel2_szerep || '') + ')\n\n' +
+            'SZERZŐDÉSRÉSZ:\n' + chunk.slice(0, 3000) + '\n\n' +
+            'Értékeld 0-100 között mennyire védett ez a szerződésrész az egyes felek számára.\n' +
+            '100 = teljesen védett, minden jog megvan\n' +
+            '0 = teljesen kiszolgáltatott, nincs védelme\n\n' +
+            'FONTOS: A két szám NEM kell hogy összegük 100 legyen! Mindkettő önállóan értékelendő.\n\n' +
+            'Csak ezt a JSON-t írd (TILOS ```json):\n' +
+            '{"fel1_score":SZAM_0_100,"fel2_score":SZAM_0_100,"pos1":"pozitívum a szerződésben max 80 kar","pos2":"pozitívum max 80 kar"}'
+          }]
+        });
+        totalInputTokens += rScore.usage.input_tokens;
+        totalOutputTokens += rScore.usage.output_tokens;
+        const score = extractJSON(rScore.content[0].text);
+        if (score) {
+          if (score.fel1_score !== undefined) s1arr.push(score.fel1_score);
+          if (score.fel2_score !== undefined) s2arr.push(score.fel2_score);
+          if (score.pos1) allPositives.push({ title: score.pos1, description: '' });
+          if (score.pos2) allPositives.push({ title: score.pos2, description: '' });
+        }
+      } catch(e) { console.error('Score hiba:', e.message); }
     }
 
+    // ── LÉPÉS 4: Összefoglalás és javaslatok ─────────────────
+    console.log('4. lépés: Összefoglalás...');
     const avgS1 = s1arr.length ? Math.round(s1arr.reduce((a,b)=>a+b,0)/s1arr.length) : 50;
     const avgS2 = s2arr.length ? Math.round(s2arr.reduce((a,b)=>a+b,0)/s2arr.length) : 50;
-    const topIssues = allIssues.slice(0,3).map(x=>x.title).join('; ') || 'nincs';
+
+    const kritikusIssues = allIssues.filter(x => x.severity === 'kritikus').slice(0,3);
+    const fel1Issues = allIssues.filter(x => x.favors === 'fel1').length;
+    const fel2Issues = allIssues.filter(x => x.favors === 'fel2').length;
 
     const sumR = await client.messages.create({
       model: 'claude-sonnet-4-5',
-      max_tokens: 500,
+      max_tokens: 600,
       messages: [{ role: 'user', content:
-        '1.fél:' + (structure.fel1||'Ügyfél') + ' védettségi szint:' + avgS1 + '/100. 2.fél:' + (structure.fel2||'Szolgáltató') + ' védettségi szint:' + avgS2 + '/100.\n' +
-        'Főbb problémák:' + topIssues + '\n' +
+        'SZERZŐDÉS ELEMZÉS ÖSSZEFOGLALÁSA:\n\n' +
+        '1. FÉL: ' + (felek.fel1_nev || '1. Fél') + ' (' + (felek.fel1_szerep || '') + ') – védettségi szint: ' + avgS1 + '/100\n' +
+        '2. FÉL: ' + (felek.fel2_nev || '2. Fél') + ' (' + (felek.fel2_szerep || '') + ') – védettségi szint: ' + avgS2 + '/100\n' +
+        'Szerződés típusa: ' + (felek.szerzodes_tipus || 'ismeretlen') + '\n' +
+        'Erősebb tárgyalási pozíció: ' + (felek.erosebb_fel === 'fel1' ? felek.fel1_nev : felek.fel2_nev) + '\n\n' +
+        'Problémák statisztika:\n' +
+        '- ' + (felek.fel1_nev || '1. félnek') + ' kedvező klauzulák: ' + fel1Issues + ' db\n' +
+        '- ' + (felek.fel2_nev || '2. félnek') + ' kedvező klauzulák: ' + fel2Issues + ' db\n' +
+        'Kritikus problémák: ' + kritikusIssues.map(x=>x.title).join(', ') + '\n\n' +
+        'Add meg a végső összefoglalót és pernyerési esélyeket.\n' +
+        'FONTOS: p1 + p2 = 100! A magasabb védettségi szintű félnek legyen magasabb esélye.\n\n' +
         'Csak ezt a JSON-t írd (TILOS ```json):\n' +
-        '{"verdict":"összítélet max 10 szó","p1":SZAM,"p2":SZAM,"merleg":"fel1_eros|fel2_eros|kiegyensulyozott","summary":"3 mondatos összefoglaló","j1a":"javaslat","j1b":"javaslat","j2a":"javaslat","j2b":"javaslat","a1":"teendő","a2":"teendő","a3":"teendő"}'
+        '{"verdict":"10 szavas összítélet","p1":SZAM,"p2":SZAM,"merleg":"fel1_eros|fel2_eros|kiegyensulyozott","summary":"3 mondatos összefoglaló konkrétan","j1a":"konkrét javaslat ' + (felek.fel1_nev||'1. félnek') + '","j1b":"konkrét javaslat","j2a":"konkrét javaslat ' + (felek.fel2_nev||'2. félnek') + '","j2b":"konkrét javaslat","a1":"legsürgősebb teendő","a2":"2. teendő","a3":"3. teendő"}'
       }]
     });
     totalInputTokens += sumR.usage.input_tokens;
     totalOutputTokens += sumR.usage.output_tokens;
     const sum = extractJSON(sumR.content[0].text) || {};
 
+    // Deduplikálás
     const seen = {};
     const dedup = allIssues.filter(x => { if(seen[x.title]) return false; seen[x.title]=true; return true; });
     const cost = estimateCost(totalInputTokens, totalOutputTokens);
+
     console.log('KÉSZ: s1=' + avgS1 + ' s2=' + avgS2 + ' issues=' + dedup.length + ' ptk=' + ptkParagraphs.length + ' | Költség: ~' + cost.cost_huf + ' Ft');
 
     res.json({
-      fel1_score: avgS1, fel2_score: avgS2,
-      fel1_name: structure.fel1 || '1. Fél', fel2_name: structure.fel2 || '2. Fél',
+      fel1_score: avgS1,
+      fel2_score: avgS2,
+      fel1_name: felek.fel1_nev || '1. Fél',
+      fel2_name: felek.fel2_nev || '2. Fél',
+      fel1_szerep: felek.fel1_szerep || '',
+      fel2_szerep: felek.fel2_szerep || '',
       per_esely_fel1: sum.p1 || Math.round(avgS1/(avgS1+avgS2)*100),
       per_esely_fel2: sum.p2 || Math.round(avgS2/(avgS1+avgS2)*100),
-      merleg: sum.merleg || 'kiegyensulyozott', score: Math.round((avgS1+avgS2)/2),
+      merleg: sum.merleg || 'kiegyensulyozott',
+      score: Math.round((avgS1+avgS2)/2),
       verdict: sum.verdict || 'Az elemzés elkészült.',
       summary: sum.summary || 'Az elemzés elkészült.',
       top_actions: [sum.a1, sum.a2, sum.a3].filter(Boolean),
@@ -341,9 +341,11 @@ app.post('/api/analyze', async (req, res) => {
       fel2_javaslatok: [sum.j2a, sum.j2b].filter(Boolean),
       issues: dedup.slice(0, 15),
       positives: allPositives.filter((v,i,a) => a.findIndex(x=>x.title===v.title)===i).slice(0,6),
-      structure: structure,
+      structure: { fel1: felek.fel1_nev, fel2: felek.fel2_nev, type: felek.szerzodes_tipus },
       ptk_references: ptkParagraphs.map(p => ({ section: p.section_id, title: p.title, book: p.book })),
-      _pages: estPages, _sections: toAnalyze.length, _cost: cost
+      _pages: estPages,
+      _sections: toAnalyze.length,
+      _cost: cost
     });
 
   } catch(err) {
@@ -382,7 +384,12 @@ app.post('/api/generate', async (req, res) => {
       const r = await client.messages.create({
         model: 'claude-sonnet-4-5', max_tokens: 8000,
         system: 'Tapasztalt magyar ügyvéd. Készíts ' + level + ' ' + type + 't PTK alapján. Védd ' + favor + ' érdekeit. Legyen teljes, konkrét Ptk. hivatkozásokkal!',
-        messages: [{ role: 'user', content: 'Típus:' + type + '\n1. Fél:' + (party1||'1. Fél') + '\n2. Fél:' + (party2||'2. Fél') + '\nÖsszeg:' + (amount||'megállapodás szerint') + '\nHatáridő:' + (deadline||'megállapodás szerint') + '\nDátum:' + (date||new Date().toLocaleDateString('hu-HU')) + '\nRészletesség:' + level + '\nTárgy:' + details + '\nKülönleges:' + (special||'szokásos') }]
+        messages: [{ role: 'user', content:
+          'Típus:' + type + '\n1. Fél:' + (party1||'1. Fél') + '\n2. Fél:' + (party2||'2. Fél') +
+          '\nÖsszeg:' + (amount||'megállapodás szerint') + '\nHatáridő:' + (deadline||'megállapodás szerint') +
+          '\nDátum:' + (date||new Date().toLocaleDateString('hu-HU')) + '\nRészletesség:' + level +
+          '\nTárgy:' + details + '\nKülönleges:' + (special||'szokásos')
+        }]
       });
       const cost = estimateCost(r.usage.input_tokens, r.usage.output_tokens);
       return res.json({ contract: r.content[0].text, _cost: cost });
