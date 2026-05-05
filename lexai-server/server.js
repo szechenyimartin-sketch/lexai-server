@@ -157,7 +157,7 @@ const MOCK_GENERATE_HINTS = {
 };
 
 app.get('/', (req, res) => {
-  res.json({ status: 'LexAI Backend', version: '13.0', mock_mode: MOCK_MODE });
+  res.json({ status: 'LexAI Backend', version: '99.0', mock_mode: MOCK_MODE });
 });
 
 app.post('/api/analyze', async (req, res) => {
