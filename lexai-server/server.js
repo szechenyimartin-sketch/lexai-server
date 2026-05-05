@@ -15,7 +15,7 @@ const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || '';
 const OPENAI_KEY = process.env.OPENAI_API_KEY || '';
 
 if (MOCK_MODE) { console.log('MOCK MODE'); }
-else { console.log('ELES MOD v4 - userParty'); }
+else { console.log('ELES MOD v99 - userParty'); }
 
 // PTK RAG
 function httpsPost(hostname, path, headers, body) {
