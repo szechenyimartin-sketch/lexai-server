@@ -10,19 +10,25 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MOCK_MODE = process.env.MOCK_MODE === 'true';
 
 if (MOCK_MODE) console.log('MOCK MODE');
-else console.log('ELES MOD v100');
+else console.log('ELES MOD v101');
 
 function extractJSON(raw) {
   if (!raw) return null;
+  // Remove markdown code blocks
   let c = raw.replace(/```json/gi, '').replace(/```/gi, '').trim();
+  // Find first { and last }
   const s = c.indexOf('{');
   const e = c.lastIndexOf('}');
   if (s < 0 || e < 0) return null;
   c = c.substring(s, e + 1);
   try { return JSON.parse(c); }
   catch(e1) {
+    // Try fixing trailing commas
     try { return JSON.parse(c.replace(/,(\s*[}\]])/g, '$1')); }
-    catch(e2) { return null; }
+    catch(e2) {
+      console.log('JSON parse failed, raw start:', c.slice(0, 200));
+      return null;
+    }
   }
 }
 
@@ -65,8 +71,8 @@ const MOCK_RESULT = {
     { title: 'Drag-Along küszöb túl alacsony (51%)', desc: 'Az 51%-os küszöb lehetővé teszi kényszereladást.', fix: 'Emeljük 75-80%-ra és adjunk minimálár garanciát.', ptk_ref: '6:137.§' }
   ],
   hianyzo_klauzulak: [
-    { title: 'Likvidációs preferencia részletei', fontossag: 'kötelező', javaslat: 'Rögzíteni kell a likvidációs sorrend pontos matematikáját.' },
-    { title: 'Információs jogok részletezése', fontossag: 'ajánlott', javaslat: 'Negyedéves pénzügyi és KPI riport kötelezettség.' }
+    { title: 'Likvidációs preferencia részletei', fontossag: 'kotelezo', javaslat: 'Rögzíteni kell a likvidációs sorrend pontos matematikáját.' },
+    { title: 'Információs jogok részletezése', fontossag: 'ajanlott', javaslat: 'Negyedéves pénzügyi és KPI riport kötelezettség.' }
   ],
   targyalasi_tippek: [
     'Kérje az ESOP pool elkülönítést a szavazati jogok tisztázásával.',
@@ -89,40 +95,40 @@ const MOCK_RESULT = {
 };
 
 app.get('/', (req, res) => {
-  res.json({ status: 'LexAI Backend', version: '100.0', mock_mode: MOCK_MODE });
+  res.json({ status: 'LexAI Backend', version: '101.0', mock_mode: MOCK_MODE });
 });
 
 app.post('/api/analyze', async (req, res) => {
   try {
     const { text, type, userParty } = req.body;
-    if (!text || text.length < 30) return res.status(400).json({ error: 'Nincs szöveg' });
+    if (!text || text.length < 30) return res.status(400).json({ error: 'Nincs szoveg' });
 
     if (MOCK_MODE) {
       await new Promise(r => setTimeout(r, 1500));
       const m = Object.assign({}, MOCK_RESULT);
-      m.user_party = userParty || 'Ügyfél';
+      m.user_party = userParty || 'Ugyfel';
       return res.json(m);
     }
 
     if (!process.env.ANTHROPIC_API_KEY) return res.status(500).json({ error: 'API kulcs hiányzik' });
 
     let totalIn = 0, totalOut = 0;
-    const ugyfel = userParty || 'az ügyfél';
+    const ugyfel = userParty || 'az ugyfel';
 
-    // LÉPÉS 1: Felek azonosítása
-    console.log('1. Felek azonosítása...');
+    // STEP 1: Identify parties
+    console.log('1. Felek azonositasa...');
     const r1 = await client.messages.create({
       model: 'claude-sonnet-4-5',
       max_tokens: 500,
       messages: [{
         role: 'user',
-        content: `Ez egy szerződés. Azonosítsd a feleket és állapítsd meg melyik fél a "${ugyfel}".
+        content: `Read this contract and identify the two parties. Determine which party is "${ugyfel}".
 
-SZERZŐDÉS ELEJE:
+CONTRACT BEGINNING:
 ${text.slice(0, 4000)}
 
-Válaszolj CSAK ebben a JSON formátumban, semmi más:
-{"fel1_nev":"pontos név","fel1_szerep":"szerepe pl. Befektető","fel2_nev":"pontos név","fel2_szerep":"szerepe pl. Alapító","szerzodes_tipus":"szerződés típusa","user_fel":"fel1 vagy fel2 attól függően melyik a ${ugyfel}"}`
+IMPORTANT: Respond ONLY with this exact JSON structure, no other text:
+{"fel1_nev":"exact name of party 1","fel1_szerep":"role e.g. Investor","fel2_nev":"exact name of party 2","fel2_szerep":"role e.g. Founder","szerzodes_tipus":"contract type in Hungarian","user_fel":"fel1 or fel2 depending on which is ${ugyfel}"}`
       }]
     });
     totalIn += r1.usage.input_tokens;
@@ -131,85 +137,89 @@ Válaszolj CSAK ebben a JSON formátumban, semmi más:
     const felek = extractJSON(r1.content[0].text) || {};
     const userIsFel1 = felek.user_fel !== 'fel2';
     const enNev = userIsFel1 ? (felek.fel1_nev || ugyfel) : (felek.fel2_nev || ugyfel);
-    const masikNev = userIsFel1 ? (felek.fel2_nev || 'Másik fél') : (felek.fel1_nev || 'Másik fél');
+    const masikNev = userIsFel1 ? (felek.fel2_nev || 'Masik fel') : (felek.fel1_nev || 'Masik fel');
     const enSzerep = userIsFel1 ? (felek.fel1_szerep || '') : (felek.fel2_szerep || '');
-    const szerzodesNev = felek.szerzodes_tipus || type || 'Szerződés';
+    const szerzodesNev = felek.szerzodes_tipus || type || 'Szerzodes';
 
-    console.log(`Felek: ${enNev} vs ${masikNev} | Típus: ${szerzodesNev}`);
+    console.log(`Felek: ${enNev} vs ${masikNev} | Tipus: ${szerzodesNev}`);
 
-    // LÉPÉS 2: Fő elemzés
-    console.log('2. Elemzés...');
+    // STEP 2: Main analysis
+    console.log('2. Elemzes...');
     const chunks = splitText(text, 14000);
-    const elemzendoSzoveg = chunks.length === 1 ? chunks[0] : chunks[0] + '\n\n...\n\n' + chunks[chunks.length - 1];
+    const elemzendoSzoveg = chunks.length === 1
+      ? chunks[0]
+      : chunks[0] + '\n\n[...]\n\n' + chunks[chunks.length - 1];
 
     const r2 = await client.messages.create({
       model: 'claude-sonnet-4-5',
       max_tokens: 4000,
+      system: 'You are an expert Hungarian contract lawyer. You MUST respond with valid JSON only. No explanations, no markdown, no text before or after the JSON object.',
       messages: [{
         role: 'user',
-        content: `Te egy tapasztalt magyar ügyvéd vagy. Elemezd ezt a szerződést KIZÁRÓLAG "${enNev}" (${enSzerep}) szemszögéből!
+        content: `Analyze this contract EXCLUSIVELY from the perspective of "${enNev}" (${enSzerep}).
+The other party is: "${masikNev}"
+Contract type: ${szerzodesNev}
 
-A MÁSIK FÉL: "${masikNev}"
-SZERZŐDÉS TÍPUSA: ${szerzodesNev}
-
-SZERZŐDÉS SZÖVEGE:
+CONTRACT:
 ${elemzendoSzoveg}
 
-FELADATOD: Találj minden fontos pontot ami "${enNev}" érdekeit érinti.
+Find all important clauses affecting "${enNev}". Write all text fields in HUNGARIAN language.
 
-Válaszolj CSAK ebben a JSON formátumban, semmi más szöveg:
+Respond with ONLY this JSON (no other text):
 {
-"risk_score": 50,
-"eros_pontok": [
-{"title": "cím max 60 kar", "desc": "magyarázat hogy ez miért jó ${enNev} számára"}
-],
-"javithato_pontok": [
-{"title": "cím", "desc": "mit kellene javítani és hogyan", "ptk_ref": "pl. 6:155.§ vagy üres string"}
-],
-"kritikus_pontok": [
-{"title": "cím", "desc": "miért hátrányos ${enNev} számára", "fix": "konkrét javítási javaslat", "ptk_ref": "pl. 6:142.§ vagy üres string"}
-],
-"hianyzo_klauzulak": [
-{"title": "cím", "fontossag": "kötelező vagy ajánlott vagy opcionális", "javaslat": "mit kellene beírni"}
-],
-"targyalasi_tippek": [
-"konkrét tárgyalási érv amit ${enNev} mondhat"
-],
-"alternativ_szovegek": [
-{"cim": "klauzula neve", "szoveg": "konkrét beilleszthető szerződéses szöveg"}
-],
-"eroviszony_szoveg": "2-3 mondatos összefoglaló az erőviszonyokról ${enNev} szemszögéből",
-"en_score": 50,
-"masik_score": 50
+  "risk_score": <number 0-100, lower means better for ${enNev}>,
+  "en_score": <number 0-100, protection level of ${enNev}>,
+  "masik_score": <number 0-100, protection level of ${masikNev}>,
+  "eros_pontok": [
+    {"title": "<clause name>", "desc": "<why this is good for ${enNev}>"}
+  ],
+  "javithato_pontok": [
+    {"title": "<clause name>", "desc": "<how to improve for ${enNev}>", "ptk_ref": "<e.g. 6:155 or empty>"}
+  ],
+  "kritikus_pontok": [
+    {"title": "<clause name>", "desc": "<why this is harmful for ${enNev}>", "fix": "<concrete fix suggestion>", "ptk_ref": "<e.g. 6:142 or empty>"}
+  ],
+  "hianyzo_klauzulak": [
+    {"title": "<missing clause>", "fontossag": "<kotelezo or ajanlott or opcionalis>", "javaslat": "<what to add>"}
+  ],
+  "targyalasi_tippek": [
+    "<concrete negotiation argument for ${enNev}>"
+  ],
+  "alternativ_szovegek": [
+    {"cim": "<clause name>", "szoveg": "<ready-to-use contract text in Hungarian>"}
+  ],
+  "eroviszony_szoveg": "<2-3 sentence summary of power balance from ${enNev} perspective in Hungarian>"
 }`
       }]
     });
     totalIn += r2.usage.input_tokens;
     totalOut += r2.usage.output_tokens;
 
+    console.log('Claude raw response start:', r2.content[0].text.slice(0, 300));
+
     const elemzes = extractJSON(r2.content[0].text);
 
     if (!elemzes) {
-      console.log('JSON parse hiba, raw:', r2.content[0].text.slice(0, 500));
-      return res.status(500).json({ error: 'Elemzési hiba - próbáld újra' });
+      console.log('JSON parse FAILED. Full response:', r2.content[0].text.slice(0, 1000));
+      return res.status(500).json({ error: 'Elemzesi hiba - probald ujra' });
     }
 
-    console.log(`Elemzés kész: ${elemzes.kritikus_pontok?.length || 0} kritikus, ${elemzes.eros_pontok?.length || 0} erős pont`);
+    console.log(`Elemzes kesz: ${elemzes.kritikus_pontok?.length || 0} kritikus, ${elemzes.eros_pontok?.length || 0} eros pont`);
 
-    // LÉPÉS 3: Összefoglaló
-    console.log('3. Összefoglaló...');
+    // STEP 3: Summary
+    console.log('3. Osszefoglalo...');
     const r3 = await client.messages.create({
       model: 'claude-sonnet-4-5',
-      max_tokens: 300,
+      max_tokens: 400,
       messages: [{
         role: 'user',
-        content: `Ügyfél: ${enNev} | Szerződés: ${szerzodesNev}
-Kockázati pontszám: ${elemzes.risk_score}/100
-Kritikus problémák: ${(elemzes.kritikus_pontok || []).slice(0, 3).map(x => x.title).join(', ')}
-Erős pontok: ${(elemzes.eros_pontok || []).slice(0, 2).map(x => x.title).join(', ')}
+        content: `Write a 3-sentence summary IN HUNGARIAN for "${enNev}" about this contract analysis.
+Risk score: ${elemzes.risk_score}/100
+Critical issues: ${(elemzes.kritikus_pontok || []).slice(0, 3).map(x => x.title).join(', ')}
+Strong points: ${(elemzes.eros_pontok || []).slice(0, 2).map(x => x.title).join(', ')}
 
-Írj egy 3 mondatos összefoglalót ${enNev} szemszögéből. Válaszolj CSAK ebben a JSON formátumban:
-{"summary": "3 mondatos összefoglaló"}`
+Respond ONLY with this JSON:
+{"summary": "<3 sentence Hungarian summary>"}`
       }]
     });
     totalIn += r3.usage.input_tokens;
@@ -218,7 +228,7 @@ Erős pontok: ${(elemzes.eros_pontok || []).slice(0, 2).map(x => x.title).join('
     const sumData = extractJSON(r3.content[0].text) || {};
     const cost = estimateCost(totalIn, totalOut);
 
-    console.log(`KÉSZ | Score: ${elemzes.risk_score} | Költség: ${cost.cost_huf} Ft`);
+    console.log(`KESZ | Score: ${elemzes.risk_score} | Koltseg: ${cost.cost_huf} Ft`);
 
     res.json({
       user_party: enNev,
@@ -237,11 +247,11 @@ Erős pontok: ${(elemzes.eros_pontok || []).slice(0, 2).map(x => x.title).join('
         masik_score: elemzes.masik_score || (100 - (elemzes.risk_score || 50)),
         en_fel: enNev,
         masik_fel: masikNev,
-        osszefoglalas: elemzes.eroviszony_szoveg || sumData.summary || 'Az elemzés elkészült.'
+        osszefoglalas: elemzes.eroviszony_szoveg || sumData.summary || 'Az elemzes elkeszult.'
       },
       alternativ_szovegek: (elemzes.alternativ_szovegek || []).slice(0, 4),
       ptk_references: [],
-      summary: sumData.summary || elemzes.eroviszony_szoveg || 'Az elemzés elkészült.',
+      summary: sumData.summary || elemzes.eroviszony_szoveg || 'Az elemzes elkeszult.',
       _cost: cost
     });
 
@@ -259,16 +269,16 @@ app.post('/api/generate', async (req, res) => {
       await new Promise(r => setTimeout(r, 800));
       if (action === 'hints') return res.json({
         hints: [
-          { text: 'Fizetési határidő és késedelmi kamat (Ptk. 6:155§)', importance: 'must' },
-          { text: 'Teljesítési hely és átvétel módja', importance: 'must' },
-          { text: 'Szavatossági feltételek', importance: 'must' },
-          { text: 'Felmondási feltételek', importance: 'rec' },
+          { text: 'Fizetesi hatarido es kesedelmi kamat (Ptk. 6:155§)', importance: 'must' },
+          { text: 'Teljesitesi hely es aatvétel modja', importance: 'must' },
+          { text: 'Szavatossagi feltetelek', importance: 'must' },
+          { text: 'Felmondasi feltetelek', importance: 'rec' },
           { text: 'Vis maior klauzula', importance: 'rec' },
-          { text: 'Vitarendezés módja', importance: 'opt' }
+          { text: 'Vitarendezés modja', importance: 'opt' }
         ]
       });
       if (action === 'generate') return res.json({
-        contract: `VÁLLALKOZÁSI SZERZŐDÉS\n\n[MOCK]\n\n${party1 || '1. Fél'} és ${party2 || '2. Fél'} között.\n\nKelt: ${date || new Date().toLocaleDateString('hu-HU')}`,
+        contract: `VALLALKOZASI SZERZODES\n\n[MOCK]\n\n${party1 || '1. Fel'} es ${party2 || '2. Fel'} kozott.\n\nKelt: ${date || new Date().toLocaleDateString('hu-HU')}`,
         _mock: true
       });
     }
@@ -279,7 +289,7 @@ app.post('/api/generate', async (req, res) => {
       const r = await client.messages.create({
         model: 'claude-sonnet-4-5',
         max_tokens: 1000,
-        messages: [{ role: 'user', content: `Magyar ügyvéd. Mit kell egy "${type}" szerződésbe "${favor}" szerint. Válaszolj CSAK JSON: {"hints":[{"text":"STRING","importance":"must|rec|opt"}]}` }]
+        messages: [{ role: 'user', content: `Hungarian lawyer. What must be in a "${type}" contract for "${favor}". Respond ONLY with JSON: {"hints":[{"text":"STRING in Hungarian","importance":"must|rec|opt"}]}` }]
       });
       return res.json(extractJSON(r.content[0].text) || { hints: [] });
     }
@@ -288,10 +298,10 @@ app.post('/api/generate', async (req, res) => {
       const r = await client.messages.create({
         model: 'claude-sonnet-4-5',
         max_tokens: 8000,
-        system: `Tapasztalt magyar ügyvéd. Készíts ${level} ${type}-t PTK alapján. Védd ${favor} érdekeit. Legyen teljes, konkrét Ptk. hivatkozásokkal!`,
+        system: `Tapasztalt magyar ugyvéd. Keszits ${level} ${type}-t PTK alapjan. Vedd ${favor} erdekeit. Legyen teljes, konkret Ptk. hivatkozasokkal!`,
         messages: [{
           role: 'user',
-          content: `Típus: ${type}\n1. Fél: ${party1 || '1. Fél'}\n2. Fél: ${party2 || '2. Fél'}\nÖsszeg: ${amount || 'megállapodás szerint'}\nHatáridő: ${deadline || 'megállapodás szerint'}\nDátum: ${date || new Date().toLocaleDateString('hu-HU')}\nRészletesség: ${level}\nTárgy: ${details}\nKülönleges: ${special || 'szokásos'}`
+          content: `Tipus: ${type}\n1. Fel: ${party1 || '1. Fel'}\n2. Fel: ${party2 || '2. Fel'}\nOsszeg: ${amount || 'megallapodas szerint'}\nHatarido: ${deadline || 'megallapodas szerint'}\nDatum: ${date || new Date().toLocaleDateString('hu-HU')}\nReszletesseg: ${level}\nTargy: ${details}\nKulonleges: ${special || 'szokásos'}`
         }]
       });
       const cost = estimateCost(r.usage.input_tokens, r.usage.output_tokens);
