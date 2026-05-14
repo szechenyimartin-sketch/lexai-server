@@ -10,34 +10,38 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MOCK_MODE = process.env.MOCK_MODE === 'true';
 
 if (MOCK_MODE) console.log('MOCK MODE');
-else console.log('ELES MOD v106');
+else console.log('ELES MOD v107');
+
+// Prefill: Claude KENYSZERITVE { val kezd
+async function claudeJSON(prompt, maxTokens) {
+  const r = await client.messages.create({
+    model: 'claude-sonnet-4-5',
+    max_tokens: maxTokens,
+    messages: [
+      { role: 'user', content: prompt },
+      { role: 'assistant', content: '{' }
+    ]
+  });
+  // A valasz mar { utan folytatodik, hozzafuzzuk
+  return '{' + r.content[0].text;
+}
 
 function tryParse(raw) {
   if (!raw) return null;
-  // Remove ALL backticks and json keyword
-  let c = raw.split('`').join('').replace(/^json\s*/m, '').trim();
-  const s = c.indexOf('{');
-  const e = c.lastIndexOf('}');
-  if (s < 0 || e < 0) { console.log('NO JSON:', c.slice(0,150)); return null; }
-  c = c.substring(s, e+1);
+  const s = raw.indexOf('{');
+  const e = raw.lastIndexOf('}');
+  if (s < 0 || e < 0) { console.log('NO JSON:', raw.slice(0,100)); return null; }
+  const c = raw.substring(s, e+1);
   try { return JSON.parse(c); }
   catch(err) {
     try { return JSON.parse(c.replace(/,(\s*[}\]])/g,'$1')); }
-    catch(err2) { console.log('PARSE ERR at pos', err2.message, '| sample:', c.slice(0,150)); return null; }
+    catch(err2) { console.log('PARSE ERR:', err2.message, c.slice(0,100)); return null; }
   }
 }
 
 function calcCost(inp, out) {
   const usd = (inp/1000000)*3.0 + (out/1000000)*15.0;
   return { input_tokens:inp, output_tokens:out, cost_usd:Math.round(usd*10000)/10000, cost_huf:Math.round(usd*370) };
-}
-
-async function claude(prompt, maxTokens) {
-  return client.messages.create({
-    model: 'claude-sonnet-4-5',
-    max_tokens: maxTokens,
-    messages: [{ role: 'user', content: prompt }]
-  });
 }
 
 const MOCK = {
@@ -51,11 +55,11 @@ const MOCK = {
   hianyzo_klauzulak:[{title:'Likvidációs preferencia',fontossag:'kotelezo',javaslat:'Rögzíteni kell a sorrendet.'}],
   targyalasi_tippek:['ESOP elkülönítés kérése.','Drag-Along 75%-ra emelése.'],
   eroviszony:{en_score:45,masik_score:55,en_fel:'Befektető',masik_fel:'Alapítók',osszefoglalas:'A szerződés az Alapítóknak kedvez.'},
-  alternativ_szovegek:[{cim:'Drag-Along minimálár',szoveg:'A jog csak akkor gyakorolható, ha a vételár eléri az eredeti befektetés 150%-át.'}],
+  alternativ_szovegek:[{cim:'Drag-Along minimálár',szoveg:'A jog csak akkor gyakorolható ha a vételár eléri az eredeti befektetés 150%-át.'}],
   ptk_references:[], summary:'A szerződés az Alapítóknak kedvező struktúrát mutat.', _mock:true
 };
 
-app.get('/', (req, res) => res.json({ status:'LexAI Backend', version:'106.0', mock_mode:MOCK_MODE }));
+app.get('/', (req, res) => res.json({ status:'LexAI Backend', version:'107.0', mock_mode:MOCK_MODE }));
 
 app.post('/api/analyze', async (req, res) => {
   try {
@@ -73,12 +77,15 @@ app.post('/api/analyze', async (req, res) => {
 
     // 1. Felek
     console.log('1. Felek...');
-    const r1 = await claude(
-      `Read this contract. Who are the two parties? Which one is "${ugyfel}"?\n\nCONTRACT:\n${text.slice(0,3000)}\n\nReturn ONLY a JSON object (no backticks, no explanation):\n{"fel1_nev":"name","fel1_szerep":"role in Hungarian","fel2_nev":"name","fel2_szerep":"role in Hungarian","szerzodes_tipus":"contract type in Hungarian","user_fel":"fel1 or fel2"}`,
-      300
-    );
+    const r1 = await client.messages.create({
+      model: 'claude-sonnet-4-5', max_tokens: 300,
+      messages: [
+        { role: 'user', content: `Read this contract. Who are the two parties? Which one is "${ugyfel}"?\n\nCONTRACT:\n${text.slice(0,3000)}\n\nReturn a JSON object:` },
+        { role: 'assistant', content: '{"fel1_nev":"' }
+      ]
+    });
     tin+=r1.usage.input_tokens; tout+=r1.usage.output_tokens;
-    const felek = tryParse(r1.content[0].text) || {};
+    const felek = tryParse('{"fel1_nev":"' + r1.content[0].text) || {};
     const userIsFel1 = felek.user_fel !== 'fel2';
     const enNev = userIsFel1 ? (felek.fel1_nev||ugyfel) : (felek.fel2_nev||ugyfel);
     const masikNev = userIsFel1 ? (felek.fel2_nev||'Masik fel') : (felek.fel1_nev||'Masik fel');
@@ -86,47 +93,52 @@ app.post('/api/analyze', async (req, res) => {
     const szTipus = felek.szerzodes_tipus || type || 'Szerzodes';
     console.log(`Felek: ${enNev} vs ${masikNev}`);
 
-    // 2a. Eros + kritikus
+    // 2a. Eros + kritikus (PREFILL)
     console.log('2a. Eros + kritikus...');
-    const r2a = await claude(
-      `You are a Hungarian contract lawyer. Analyze this contract ONLY from "${enNev}" (${enSzerep}) perspective.\nOther party: "${masikNev}". Contract: ${szTipus}.\n\nCONTRACT:\n${szoveg}\n\nFind strong points and critical problems for "${enNev}".\nAll text in Hungarian.\nReturn ONLY a JSON object (no backticks, no explanation):\n{"risk_score":50,"en_score":50,"masik_score":50,"eros_pontok":[{"title":"cim","desc":"magyarazat"}],"kritikus_pontok":[{"title":"cim","desc":"miert hatranyos","fix":"javitas","ptk_ref":""}]}`,
+    const raw2a = await claudeJSON(
+      `You are a Hungarian contract lawyer. Analyze this contract from "${enNev}" (${enSzerep}) perspective.\nOther party: "${masikNev}". Contract: ${szTipus}.\n\nCONTRACT:\n${szoveg}\n\nFind strong points and critical problems for "${enNev}". All text in Hungarian.\n\nComplete this JSON:`,
       1500
     );
-    tin+=r2a.usage.input_tokens; tout+=r2a.usage.output_tokens;
-    console.log('r2a:', r2a.content[0].text.slice(0,100));
-    const d2a = tryParse(r2a.content[0].text) || {};
+    tin += 500; tout += 500; // becsles
+    console.log('r2a:', raw2a.slice(0,100));
+    const d2a = tryParse(raw2a) || {};
+    // Ha ures, probald meg ujra egyszerubb prompttal
+    if (!d2a.risk_score) {
+      console.log('2a retry...');
+      const raw2a2 = await claudeJSON(
+        `Hungarian contract lawyer. Contract: ${szTipus}. Client: ${enNev}. Other: ${masikNev}.\n\nContract text: ${szoveg.slice(0,4000)}\n\nAnalyze for ${enNev}. Hungarian text. Complete this JSON:`,
+        1200
+      );
+      const d2a2 = tryParse(raw2a2) || {};
+      if (d2a2.risk_score) Object.assign(d2a, d2a2);
+    }
     console.log(`2a: risk=${d2a.risk_score}, kritikus=${d2a.kritikus_pontok?.length||0}, eros=${d2a.eros_pontok?.length||0}`);
 
-    // 2b. Javithato + hianyzo
+    // 2b. Javithato + hianyzo (PREFILL)
     console.log('2b. Javithato...');
-    const r2b = await claude(
-      `You are a Hungarian contract lawyer. Contract: ${szTipus} between "${enNev}" and "${masikNev}".\n\nCONTRACT:\n${szoveg}\n\nFind improvable and missing clauses for "${enNev}".\nAll text in Hungarian.\nReturn ONLY a JSON object (no backticks, no explanation):\n{"javithato_pontok":[{"title":"cim","desc":"mit javitani","ptk_ref":""}],"hianyzo_klauzulak":[{"title":"cim","fontossag":"kotelezo vagy ajanlott","javaslat":"mit kellene beírni"}]}`,
+    const raw2b = await claudeJSON(
+      `Hungarian contract lawyer. Contract: ${szTipus} between "${enNev}" and "${masikNev}".\n\nCONTRACT:\n${szoveg}\n\nFind improvable and missing clauses for "${enNev}". All text in Hungarian.\n\nComplete this JSON:`,
       1200
     );
-    tin+=r2b.usage.input_tokens; tout+=r2b.usage.output_tokens;
-    console.log('r2b:', r2b.content[0].text.slice(0,100));
-    const d2b = tryParse(r2b.content[0].text) || {};
+    const d2b = tryParse(raw2b) || {};
     console.log(`2b: javithato=${d2b.javithato_pontok?.length||0}, hianyzo=${d2b.hianyzo_klauzulak?.length||0}`);
 
-    // 2c. Tippek
+    // 2c. Tippek (PREFILL)
     console.log('2c. Tippek...');
     const issues = (d2a.kritikus_pontok||[]).slice(0,3).map(x=>x.title).join(', ') || 'altalanos problemak';
-    const r2c = await claude(
-      `Hungarian contract lawyer. Client: "${enNev}". Contract: ${szTipus}. Problems: ${issues}.\n\nGive negotiation tips and alternative clause texts for "${enNev}".\nAll text in Hungarian.\nReturn ONLY a JSON object (no backticks, no explanation):\n{"targyalasi_tippek":["konkret erv"],"alternativ_szovegek":[{"cim":"klauzula neve","szoveg":"beillesztheto szoveg"}],"eroviszony_szoveg":"2 mondatos osszefoglalo"}`,
+    const raw2c = await claudeJSON(
+      `Hungarian contract lawyer. Client: "${enNev}". Contract: ${szTipus}. Problems: ${issues}.\n\nGive negotiation tips and alternative texts for "${enNev}". All text in Hungarian.\n\nComplete this JSON:`,
       1000
     );
-    tin+=r2c.usage.input_tokens; tout+=r2c.usage.output_tokens;
-    console.log('r2c:', r2c.content[0].text.slice(0,100));
-    const d2c = tryParse(r2c.content[0].text) || {};
+    const d2c = tryParse(raw2c) || {};
 
-    // 3. Osszefoglalo
+    // 3. Osszefoglalo (PREFILL)
     console.log('3. Osszefoglalo...');
-    const r3 = await claude(
-      `Write 3 sentences in Hungarian for "${enNev}" about this contract.\nRisk: ${d2a.risk_score||50}/100. Problems: ${issues}.\nReturn ONLY a JSON object (no backticks, no explanation):\n{"summary":"3 mondatos magyar osszefoglalo"}`,
+    const raw3 = await claudeJSON(
+      `Write 3 sentences in Hungarian for "${enNev}" about this ${szTipus}.\nRisk: ${d2a.risk_score||50}/100. Problems: ${issues}.\n\nComplete this JSON:`,
       250
     );
-    tin+=r3.usage.input_tokens; tout+=r3.usage.output_tokens;
-    const d3 = tryParse(r3.content[0].text) || {};
+    const d3 = tryParse(raw3) || {};
 
     const c = calcCost(tin, tout);
     console.log(`KESZ | Score: ${d2a.risk_score} | Kritikus: ${d2a.kritikus_pontok?.length||0} | Koltseg: ${c.cost_huf} Ft`);
@@ -172,8 +184,8 @@ app.post('/api/generate', async (req, res) => {
     }
     if (!process.env.ANTHROPIC_API_KEY) return res.status(500).json({ error:'API kulcs hiányzik' });
     if (action==='hints') {
-      const r = await claude(`Hungarian lawyer. What must be in a "${type}" contract for "${favor}". Return ONLY JSON object (no backticks):\n{"hints":[{"text":"STRING in Hungarian","importance":"must|rec|opt"}]}`, 800);
-      return res.json(tryParse(r.content[0].text) || {hints:[]});
+      const raw = await claudeJSON(`Hungarian lawyer. What must be in a "${type}" contract for "${favor}". Complete this JSON:`, 800);
+      return res.json(tryParse(raw) || {hints:[]});
     }
     if (action==='generate') {
       const r = await client.messages.create({
