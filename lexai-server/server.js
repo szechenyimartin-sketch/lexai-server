@@ -10,26 +10,39 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MOCK_MODE = process.env.MOCK_MODE === 'true';
 
 if (MOCK_MODE) console.log('MOCK MODE');
-else console.log('ELES MOD v108');
+else console.log('ELES MOD v109');
 
-async function claudeJSON(prompt, maxTokens) {
+// XML tagek kozott kerunk JSON-t - ez 100%-ban mukodik
+async function askClaude(systemPrompt, userPrompt, maxTokens) {
   const r = await client.messages.create({
     model: 'claude-sonnet-4-5',
     max_tokens: maxTokens,
-    messages: [
-      { role: 'user', content: prompt },
-      { role: 'assistant', content: '{' }
-    ]
+    system: systemPrompt,
+    messages: [{ role: 'user', content: userPrompt }]
   });
-  const raw = '{' + r.content[0].text;
-  const s = raw.indexOf('{');
-  const e = raw.lastIndexOf('}');
-  if (s < 0 || e < 0) { console.log('NO JSON'); return null; }
-  const c = raw.substring(s, e+1);
-  try { return { data: JSON.parse(c), tokens: r.usage }; }
-  catch(err) {
-    try { return { data: JSON.parse(c.replace(/,(\s*[}\]])/g,'$1')), tokens: r.usage }; }
-    catch(err2) { console.log('PARSE ERR:', err2.message, '|', c.slice(0,100)); return null; }
+  const text = r.content[0].text;
+  // XML tag kinyerese
+  const match = text.match(/<json>([\s\S]*?)<\/json>/i);
+  if (!match) {
+    console.log('NO XML TAG, trying direct parse. Raw:', text.slice(0,200));
+    // Fallback: direkt JSON kereses
+    const s = text.indexOf('{');
+    const e = text.lastIndexOf('}');
+    if (s >= 0 && e >= 0) {
+      try { return { data: JSON.parse(text.substring(s, e+1)), usage: r.usage }; }
+      catch(e) {}
+    }
+    return { data: null, usage: r.usage };
+  }
+  try {
+    return { data: JSON.parse(match[1].trim()), usage: r.usage };
+  } catch(err) {
+    try {
+      return { data: JSON.parse(match[1].trim().replace(/,(\s*[}\]])/g,'$1')), usage: r.usage };
+    } catch(err2) {
+      console.log('XML PARSE ERR:', err2.message, match[1].slice(0,150));
+      return { data: null, usage: r.usage };
+    }
   }
 }
 
@@ -53,7 +66,7 @@ const MOCK = {
   ptk_references:[], summary:'A szerződés az Alapítóknak kedvező struktúrát mutat.', _mock:true
 };
 
-app.get('/', (req, res) => res.json({ status:'LexAI Backend', version:'108.0', mock_mode:MOCK_MODE }));
+app.get('/', (req, res) => res.json({ status:'LexAI Backend', version:'109.0', mock_mode:MOCK_MODE }));
 
 app.post('/api/analyze', async (req, res) => {
   try {
@@ -66,75 +79,80 @@ app.post('/api/analyze', async (req, res) => {
     if (!process.env.ANTHROPIC_API_KEY) return res.status(500).json({ error:'API kulcs hiányzik' });
 
     let tin=0, tout=0;
-    const ugyfel = userParty || 'the client';
+    const ugyfel = userParty || 'az ugyfel';
     const szoveg = text.slice(0, 8000);
 
-    // 1. Felek azonositasa
+    // 1. Felek
     console.log('1. Felek...');
-    const r1 = await claudeJSON(
-      `Identify the two parties in this contract. Which party is "${ugyfel}"?\n\nCONTRACT:\n${text.slice(0,3000)}\n\nJSON with these exact keys:`,
-      300
+    const r1 = await askClaude(
+      'You are a contract analysis assistant. Always wrap your JSON response in <json></json> tags.',
+      `Identify the two parties in this contract. Which one is "${ugyfel}"?\n\nCONTRACT:\n${text.slice(0,3000)}\n\nRespond with <json>{"fel1_nev":"...","fel1_szerep":"...","fel2_nev":"...","fel2_szerep":"...","szerzodes_tipus":"...","user_fel":"fel1 or fel2"}</json>`,
+      400
     );
-    if (r1) { tin+=r1.tokens.input_tokens; tout+=r1.tokens.output_tokens; }
-    const felek = r1?.data || {};
+    tin += r1.usage.input_tokens; tout += r1.usage.output_tokens;
+    const felek = r1.data || {};
     const userIsFel1 = felek.user_fel !== 'fel2';
     const enNev = userIsFel1 ? (felek.fel1_nev||ugyfel) : (felek.fel2_nev||ugyfel);
-    const masikNev = userIsFel1 ? (felek.fel2_nev||'Other party') : (felek.fel1_nev||'Other party');
+    const masikNev = userIsFel1 ? (felek.fel2_nev||'Masik fel') : (felek.fel1_nev||'Masik fel');
     const enSzerep = userIsFel1 ? (felek.fel1_szerep||'') : (felek.fel2_szerep||'');
-    const szTipus = felek.szerzodes_tipus || type || 'Contract';
+    const szTipus = felek.szerzodes_tipus || type || 'Szerzodes';
     console.log(`Felek: ${enNev} vs ${masikNev}`);
 
-    // 2. FO ELEMZES - ANGOL - igy biztosan nem torik el az encoding
-    console.log('2. Fo elemzes (angol)...');
-    const r2 = await claudeJSON(
-      `You are an expert Hungarian contract lawyer. Analyze this contract ONLY from the perspective of "${enNev}" (${enSzerep}). Other party: "${masikNev}". Contract type: ${szTipus}.\n\nCONTRACT TEXT:\n${szoveg}\n\nProvide a comprehensive analysis in ENGLISH (we will translate later). Find ALL important clauses.\n\nJSON with these exact keys (use English for all text values):`,
-      2000
-    );
-    if (r2) { tin+=r2.tokens.input_tokens; tout+=r2.tokens.output_tokens; }
-    const elemzesEN = r2?.data || {};
-    console.log(`Elemzes EN: risk=${elemzesEN.risk_score}, critical=${elemzesEN.critical_issues?.length||0}, strong=${elemzesEN.strong_points?.length||0}`);
+    // 2. Fo elemzes
+    console.log('2. Elemzes...');
+    const r2 = await askClaude(
+      `Te egy tapasztalt magyar szerződésjogász vagy. MINDIG <json></json> tagek közé tedd a JSON választ. Minden szöveges értéket magyarul írj.`,
+      `Elemezd ezt a szerződést KIZÁRÓLAG "${enNev}" (${enSzerep}) szemszögéből!
+Másik fél: "${masikNev}"
+Szerződés típusa: ${szTipus}
 
-    // 3. FORDITAS MAGYARRA - egy hivas
-    console.log('3. Forditas magyarra...');
-    const r3 = await claudeJSON(
-      `Translate this contract analysis to Hungarian. Keep all the legal meaning but write naturally in Hungarian.\n\nENGLISH ANALYSIS:\n${JSON.stringify(elemzesEN).slice(0,3000)}\n\nClient: "${enNev}", Other party: "${masikNev}", Contract: ${szTipus}\n\nReturn translated JSON with these exact Hungarian keys:`,
-      2000
-    );
-    if (r3) { tin+=r3.tokens.input_tokens; tout+=r3.tokens.output_tokens; }
-    const elemzesHU = r3?.data || {};
-    console.log(`Forditas HU: kritikus=${elemzesHU.kritikus_pontok?.length||0}, eros=${elemzesHU.eros_pontok?.length||0}`);
+SZERZŐDÉS SZÖVEGE:
+${szoveg}
 
-    // Ha a forditas ures, hasznaljuk az angol verzioval feltoltve
-    const riskScore = elemzesHU.risk_score || elemzesEN.risk_score || 50;
-    const erosPontok = elemzesHU.eros_pontok || elemzesEN.strong_points?.map(x=>({title:x.title||x,desc:x.description||x.desc||''})) || [];
-    const kritikusPontok = elemzesHU.kritikus_pontok || elemzesEN.critical_issues?.map(x=>({title:x.title||x,desc:x.description||x.desc||'',fix:x.fix||x.recommendation||'',ptk_ref:''})) || [];
-    const javithatoPontok = elemzesHU.javithato_pontok || elemzesEN.improvable_clauses?.map(x=>({title:x.title||x,desc:x.description||x.desc||'',ptk_ref:''})) || [];
-    const hianyzoKlauzulak = elemzesHU.hianyzo_klauzulak || elemzesEN.missing_clauses?.map(x=>({title:x.title||x,fontossag:'ajanlott',javaslat:x.suggestion||x.desc||''})) || [];
-    const targyalasiTippek = elemzesHU.targyalasi_tippek || elemzesEN.negotiation_tips || [];
-    const alternativSzovegek = elemzesHU.alternativ_szovegek || elemzesEN.alternative_texts?.map(x=>({cim:x.title||x.cim||'',szoveg:x.text||x.szoveg||''})) || [];
-    const summary = elemzesHU.summary || elemzesEN.summary || 'Az elemzes elkeszult.';
-    const eroviszonyText = elemzesHU.eroviszony_szoveg || elemzesEN.power_balance || summary;
+Találd meg az összes fontos pontot ami "${enNev}" érdekeit érinti.
+
+Válaszolj ebben a formában:
+<json>
+{
+  "risk_score": 50,
+  "en_score": 50,
+  "masik_score": 50,
+  "eros_pontok": [{"title": "cim", "desc": "magyarazat"}],
+  "javithato_pontok": [{"title": "cim", "desc": "mit javitani", "ptk_ref": ""}],
+  "kritikus_pontok": [{"title": "cim", "desc": "miert hatranyos", "fix": "javitas", "ptk_ref": ""}],
+  "hianyzo_klauzulak": [{"title": "cim", "fontossag": "kotelezo", "javaslat": "mit irni"}],
+  "targyalasi_tippek": ["konkret erv"],
+  "alternativ_szovegek": [{"cim": "klauzula", "szoveg": "szoveg"}],
+  "eroviszony_szoveg": "2 mondatos osszefoglalo",
+  "summary": "3 mondatos osszefoglalo"
+}
+</json>`,
+      3000
+    );
+    tin += r2.usage.input_tokens; tout += r2.usage.output_tokens;
+    const d = r2.data || {};
+    console.log(`Elemzes: risk=${d.risk_score}, kritikus=${d.kritikus_pontok?.length||0}, eros=${d.eros_pontok?.length||0}`);
 
     const c = calcCost(tin, tout);
-    console.log(`KESZ | Score: ${riskScore} | Kritikus: ${kritikusPontok.length} | Koltseg: ${c.cost_huf} Ft`);
+    console.log(`KESZ | Score: ${d.risk_score} | Kritikus: ${d.kritikus_pontok?.length||0} | Koltseg: ${c.cost_huf} Ft`);
 
     res.json({
       user_party:enNev, en_nev:enNev, masik_nev:masikNev, en_szerep:enSzerep,
-      contract_type:szTipus, risk_score:riskScore,
-      eros_pontok:erosPontok.slice(0,6),
-      javithato_pontok:javithatoPontok.slice(0,8),
-      kritikus_pontok:kritikusPontok.slice(0,10),
-      hianyzo_klauzulak:hianyzoKlauzulak.slice(0,8),
-      targyalasi_tippek:targyalasiTippek.slice(0,6),
+      contract_type:szTipus, risk_score:d.risk_score||50,
+      eros_pontok:(d.eros_pontok||[]).slice(0,6),
+      javithato_pontok:(d.javithato_pontok||[]).slice(0,8),
+      kritikus_pontok:(d.kritikus_pontok||[]).slice(0,10),
+      hianyzo_klauzulak:(d.hianyzo_klauzulak||[]).slice(0,8),
+      targyalasi_tippek:(d.targyalasi_tippek||[]).slice(0,6),
       eroviszony:{
-        en_score:elemzesHU.en_score||elemzesEN.client_score||riskScore,
-        masik_score:elemzesHU.masik_score||elemzesEN.other_score||(100-riskScore),
+        en_score:d.en_score||50,
+        masik_score:d.masik_score||50,
         en_fel:enNev, masik_fel:masikNev,
-        osszefoglalas:eroviszonyText
+        osszefoglalas:d.eroviszony_szoveg||d.summary||'Az elemzes elkeszult.'
       },
-      alternativ_szovegek:alternativSzovegek.slice(0,4),
+      alternativ_szovegek:(d.alternativ_szovegek||[]).slice(0,4),
       ptk_references:[],
-      summary:summary,
+      summary:d.summary||d.eroviszony_szoveg||'Az elemzes elkeszult.',
       _cost:c
     });
 
@@ -160,8 +178,12 @@ app.post('/api/generate', async (req, res) => {
     }
     if (!process.env.ANTHROPIC_API_KEY) return res.status(500).json({ error:'API kulcs hiányzik' });
     if (action==='hints') {
-      const r = await claudeJSON(`Hungarian lawyer. List what must be in a "${type}" contract protecting "${favor}". JSON:`, 800);
-      return res.json(r?.data || {hints:[]});
+      const r = await askClaude(
+        'Hungarian contract lawyer. Wrap JSON in <json></json> tags.',
+        `What must be in a "${type}" contract for "${favor}"? Respond: <json>{"hints":[{"text":"STRING in Hungarian","importance":"must|rec|opt"}]}</json>`,
+        800
+      );
+      return res.json(r.data || {hints:[]});
     }
     if (action==='generate') {
       const r = await client.messages.create({
