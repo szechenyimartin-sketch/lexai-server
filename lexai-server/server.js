@@ -10,27 +10,20 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MOCK_MODE = process.env.MOCK_MODE === 'true';
 
 if (MOCK_MODE) console.log('MOCK MODE');
-else console.log('ELES MOD v105');
+else console.log('ELES MOD v106');
 
 function tryParse(raw) {
   if (!raw) return null;
-  // Agressziv strip
-  let c = raw
-    .replace(/^```json\s*/i, '')
-    .replace(/^```\s*/i, '')
-    .replace(/\s*```$/i, '')
-    .trim();
+  // Remove ALL backticks and json keyword
+  let c = raw.split('`').join('').replace(/^json\s*/m, '').trim();
   const s = c.indexOf('{');
   const e = c.lastIndexOf('}');
-  if (s < 0 || e < 0) { console.log('NO JSON:', c.slice(0,100)); return null; }
+  if (s < 0 || e < 0) { console.log('NO JSON:', c.slice(0,150)); return null; }
   c = c.substring(s, e+1);
   try { return JSON.parse(c); }
   catch(err) {
     try { return JSON.parse(c.replace(/,(\s*[}\]])/g,'$1')); }
-    catch(err2) {
-      console.log('PARSE ERR:', err2.message, '| start:', c.slice(0,150));
-      return null;
-    }
+    catch(err2) { console.log('PARSE ERR at pos', err2.message, '| sample:', c.slice(0,150)); return null; }
   }
 }
 
@@ -62,7 +55,7 @@ const MOCK = {
   ptk_references:[], summary:'A szerződés az Alapítóknak kedvező struktúrát mutat.', _mock:true
 };
 
-app.get('/', (req, res) => res.json({ status:'LexAI Backend', version:'105.0', mock_mode:MOCK_MODE }));
+app.get('/', (req, res) => res.json({ status:'LexAI Backend', version:'106.0', mock_mode:MOCK_MODE }));
 
 app.post('/api/analyze', async (req, res) => {
   try {
@@ -81,7 +74,7 @@ app.post('/api/analyze', async (req, res) => {
     // 1. Felek
     console.log('1. Felek...');
     const r1 = await claude(
-      `Read this contract. Who are the two parties? Which one is "${ugyfel}"?\n\nCONTRACT:\n${text.slice(0,3000)}\n\nRespond with ONLY a JSON object, no markdown, no explanation:\n{"fel1_nev":"name","fel1_szerep":"role in Hungarian","fel2_nev":"name","fel2_szerep":"role in Hungarian","szerzodes_tipus":"contract type in Hungarian","user_fel":"fel1 or fel2"}`,
+      `Read this contract. Who are the two parties? Which one is "${ugyfel}"?\n\nCONTRACT:\n${text.slice(0,3000)}\n\nReturn ONLY a JSON object (no backticks, no explanation):\n{"fel1_nev":"name","fel1_szerep":"role in Hungarian","fel2_nev":"name","fel2_szerep":"role in Hungarian","szerzodes_tipus":"contract type in Hungarian","user_fel":"fel1 or fel2"}`,
       300
     );
     tin+=r1.usage.input_tokens; tout+=r1.usage.output_tokens;
@@ -96,18 +89,18 @@ app.post('/api/analyze', async (req, res) => {
     // 2a. Eros + kritikus
     console.log('2a. Eros + kritikus...');
     const r2a = await claude(
-      `You are a Hungarian contract lawyer. Analyze this contract ONLY from the perspective of "${enNev}" (${enSzerep}).\nOther party: "${masikNev}". Contract: ${szTipus}.\n\nCONTRACT TEXT:\n${szoveg}\n\nTask: Find strong points (beneficial for ${enNev}) and critical problems (harmful for ${enNev}).\nWrite all values in Hungarian language.\nRespond with ONLY a raw JSON object. No markdown. No explanation. No backticks.\n\n{"risk_score":50,"en_score":50,"masik_score":50,"eros_pontok":[{"title":"rovid cim","desc":"magyarazat miert jo"}],"kritikus_pontok":[{"title":"rovid cim","desc":"miert hatranyos","fix":"konkret javitas","ptk_ref":"pl 6:137 vagy ures string"}]}`,
+      `You are a Hungarian contract lawyer. Analyze this contract ONLY from "${enNev}" (${enSzerep}) perspective.\nOther party: "${masikNev}". Contract: ${szTipus}.\n\nCONTRACT:\n${szoveg}\n\nFind strong points and critical problems for "${enNev}".\nAll text in Hungarian.\nReturn ONLY a JSON object (no backticks, no explanation):\n{"risk_score":50,"en_score":50,"masik_score":50,"eros_pontok":[{"title":"cim","desc":"magyarazat"}],"kritikus_pontok":[{"title":"cim","desc":"miert hatranyos","fix":"javitas","ptk_ref":""}]}`,
       1500
     );
     tin+=r2a.usage.input_tokens; tout+=r2a.usage.output_tokens;
-    console.log('r2a:', r2a.content[0].text.slice(0,150));
+    console.log('r2a:', r2a.content[0].text.slice(0,100));
     const d2a = tryParse(r2a.content[0].text) || {};
     console.log(`2a: risk=${d2a.risk_score}, kritikus=${d2a.kritikus_pontok?.length||0}, eros=${d2a.eros_pontok?.length||0}`);
 
     // 2b. Javithato + hianyzo
-    console.log('2b. Javithato + hianyzo...');
+    console.log('2b. Javithato...');
     const r2b = await claude(
-      `You are a Hungarian contract lawyer. Analyze this contract from "${enNev}" perspective.\nContract: ${szTipus} between ${enNev} and ${masikNev}.\n\nCONTRACT TEXT:\n${szoveg}\n\nTask: Find improvable clauses and missing clauses that would protect "${enNev}".\nWrite all values in Hungarian language.\nRespond with ONLY a raw JSON object. No markdown. No explanation. No backticks.\n\n{"javithato_pontok":[{"title":"rovid cim","desc":"mit kellene javitani","ptk_ref":"pl 6:155 vagy ures string"}],"hianyzo_klauzulak":[{"title":"rovid cim","fontossag":"kotelezo vagy ajanlott","javaslat":"konkret szoveg ami hianyzik"}]}`,
+      `You are a Hungarian contract lawyer. Contract: ${szTipus} between "${enNev}" and "${masikNev}".\n\nCONTRACT:\n${szoveg}\n\nFind improvable and missing clauses for "${enNev}".\nAll text in Hungarian.\nReturn ONLY a JSON object (no backticks, no explanation):\n{"javithato_pontok":[{"title":"cim","desc":"mit javitani","ptk_ref":""}],"hianyzo_klauzulak":[{"title":"cim","fontossag":"kotelezo vagy ajanlott","javaslat":"mit kellene beírni"}]}`,
       1200
     );
     tin+=r2b.usage.input_tokens; tout+=r2b.usage.output_tokens;
@@ -115,11 +108,11 @@ app.post('/api/analyze', async (req, res) => {
     const d2b = tryParse(r2b.content[0].text) || {};
     console.log(`2b: javithato=${d2b.javithato_pontok?.length||0}, hianyzo=${d2b.hianyzo_klauzulak?.length||0}`);
 
-    // 2c. Targyalasi tippek
+    // 2c. Tippek
     console.log('2c. Tippek...');
-    const issues = (d2a.kritikus_pontok||[]).slice(0,3).map(x=>x.title).join(', ') || 'general issues';
+    const issues = (d2a.kritikus_pontok||[]).slice(0,3).map(x=>x.title).join(', ') || 'altalanos problemak';
     const r2c = await claude(
-      `You are a Hungarian contract lawyer. Client: "${enNev}". Contract: ${szTipus}.\nKey problems: ${issues}.\n\nTask: Give concrete negotiation arguments and ready-to-use contract clause texts for "${enNev}".\nWrite all values in Hungarian language.\nRespond with ONLY a raw JSON object. No markdown. No explanation. No backticks.\n\n{"targyalasi_tippek":["konkret targyalasi erv amit ${enNev} mondhat"],"alternativ_szovegek":[{"cim":"klauzula neve","szoveg":"beillesztheto szerzodeses szoveg"}],"eroviszony_szoveg":"2 mondatos osszefoglalo az eroviszonyokrol"}`,
+      `Hungarian contract lawyer. Client: "${enNev}". Contract: ${szTipus}. Problems: ${issues}.\n\nGive negotiation tips and alternative clause texts for "${enNev}".\nAll text in Hungarian.\nReturn ONLY a JSON object (no backticks, no explanation):\n{"targyalasi_tippek":["konkret erv"],"alternativ_szovegek":[{"cim":"klauzula neve","szoveg":"beillesztheto szoveg"}],"eroviszony_szoveg":"2 mondatos osszefoglalo"}`,
       1000
     );
     tin+=r2c.usage.input_tokens; tout+=r2c.usage.output_tokens;
@@ -129,7 +122,7 @@ app.post('/api/analyze', async (req, res) => {
     // 3. Osszefoglalo
     console.log('3. Osszefoglalo...');
     const r3 = await claude(
-      `Write exactly 3 sentences in Hungarian summarizing this contract for "${enNev}".\nRisk: ${d2a.risk_score||50}/100. Problems: ${issues}.\nRespond with ONLY a raw JSON object. No markdown. No backticks.\n{"summary":"3 mondatos magyar osszefoglalo"}`,
+      `Write 3 sentences in Hungarian for "${enNev}" about this contract.\nRisk: ${d2a.risk_score||50}/100. Problems: ${issues}.\nReturn ONLY a JSON object (no backticks, no explanation):\n{"summary":"3 mondatos magyar osszefoglalo"}`,
       250
     );
     tin+=r3.usage.input_tokens; tout+=r3.usage.output_tokens;
@@ -179,7 +172,7 @@ app.post('/api/generate', async (req, res) => {
     }
     if (!process.env.ANTHROPIC_API_KEY) return res.status(500).json({ error:'API kulcs hiányzik' });
     if (action==='hints') {
-      const r = await claude(`Hungarian lawyer. What must be in a "${type}" contract for "${favor}". Respond with ONLY raw JSON object, no markdown:\n{"hints":[{"text":"STRING in Hungarian","importance":"must|rec|opt"}]}`, 800);
+      const r = await claude(`Hungarian lawyer. What must be in a "${type}" contract for "${favor}". Return ONLY JSON object (no backticks):\n{"hints":[{"text":"STRING in Hungarian","importance":"must|rec|opt"}]}`, 800);
       return res.json(tryParse(r.content[0].text) || {hints:[]});
     }
     if (action==='generate') {
